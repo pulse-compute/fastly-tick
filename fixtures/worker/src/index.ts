@@ -23,10 +23,11 @@ app.post('/__tick/run', async (ctx) => {
   }
   const token = await ctx.secret.get('UPTIME_TICK_TOKEN')
   if (!token || authorization !== 'Bearer ' + token) return ctx.text('rejected', { status: 401 })
-  // One fixed protocol example. General slots and retries belong to FT-04/05.
-  if (runId !== 'uptime:slot:0' || attempt !== '1') return ctx.text('invalid invocation', { status: 400 })
+  if (attempt !== '1') return ctx.text('invalid invocation', { status: 400 })
   const input = await ctx.req.json<Invocation>('fixture.Invocation')
-  if (input.worker !== 'uptime' || input.scheduledForMs !== 0) return ctx.text('invalid invocation', { status: 400 })
+  if (input.worker !== 'uptime' || input.scheduledForMs < 0 ||
+      input.scheduledForMs > 253402300799999 || input.scheduledForMs % 15000 !== 0 ||
+      runId !== 'uptime:slot:' + input.scheduledForMs) return ctx.text('invalid invocation', { status: 400 })
 
   // This fixture's complete work is durably recording an accepted invocation.
   // It ACKs after persistence, with no background task or implied execution queue.
