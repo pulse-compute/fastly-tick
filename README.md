@@ -24,7 +24,7 @@ npm ci --ignore-scripts
 npm run verify
 ```
 
-`verify` runs `check` (package/lock metadata, types, trigger configuration/behavior and canonical app
+`verify` runs `check` (package/lock metadata, types, trigger configuration/behavior, worker installer and canonical app
 fixtures) before `verify:native` (receiver/worker builds, injected Fastly ABI
 fixtures and reports). The dispatch, registry, retry and operations suites share
 one freshly built enabled receiver; admission additionally builds its distinct
@@ -67,8 +67,15 @@ manifest and public fixture token; never deploy that manifest or credential.
 
 ## npm package and manual publication
 
+External Pulse apps can run `npx fastly-tick worker uptime` after installing the
+package, then mount `app.post('/__tick', tickHandler)`. The generated Native-compatible
+source checks the invocation and ACKs only after an explicit acceptance function.
+The default credential setting is `TICK_TOKEN`; no callback URL is required.
+See [worker setup](docs/worker.md) for configuration, acceptance and the existing
+scheduler's `/__tick/run` compatibility route.
+
 **`@pulse-compute/fastly-tick`** packages the receiver source/configuration, focused
-tests, worker fixture source, setup examples, docs and the actual Native Wasm /
+tests, worker fixture source, worker source installer/templates, setup examples, docs and the actual Native Wasm /
 digest / build provenance / JSON and HTML reports. Its allowlist excludes local
 settings, credentials, compiler caches, canonical intermediate builds and worker
 test binaries. The root `fastly.toml` remains a public-token local fixture;

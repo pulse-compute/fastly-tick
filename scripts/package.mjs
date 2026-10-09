@@ -20,6 +20,8 @@ assert.equal(lock.packages[''].name, pkg.name)
 assert.equal(lock.packages[''].version, pkg.version)
 assert.deepEqual(lock.packages[''].dependencies, pkg.dependencies)
 assert.deepEqual(lock.packages[''].devDependencies, pkg.devDependencies)
+assert.deepEqual(lock.packages[''].bin, pkg.bin)
+assert.equal(pkg.bin['fastly-tick'], 'scripts/worker.mjs')
 if (process.env.EXPECTED_VERSION !== undefined) assert.equal(pkg.version, process.env.EXPECTED_VERSION, 'Publish the committed package version; bump it in a PR')
 assert.ok(Array.isArray(pkg.files) && !pkg.files.includes('*'), 'Declare the package file allowlist')
 
@@ -47,6 +49,10 @@ if (mode === 'check') {
     for (const path of ['package.json', 'npm-shrinkwrap.json', 'README.md', '.pulse/config.ts', 'src/index.ts', 'src/schemas.ts',
       'tsconfig.json', 'fastly.toml', 'scripts/report.mjs', 'test/pulse.harness.ts',
       'fixtures/worker/package.json', 'fixtures/worker/.pulse/config.ts', 'fixtures/worker/src/index.ts',
+      'fixtures/worker/src/accept.ts', 'fixtures/worker/src/tick/handler.ts',
+      'fixtures/worker/src/tick/index.ts', 'fixtures/worker/src/tick/schemas.ts',
+      'scripts/worker.mjs', 'templates/worker/handler.ts', 'templates/worker/accept.ts',
+      'templates/worker/index.ts', 'templates/worker/schemas.ts', 'docs/worker.md',
       'deploy/trigger.example.json', 'deploy/registry.example.json', 'dist/bin/main.wasm',
       'dist/bin/main.wasm.sha256', 'dist/fastly.toml', 'dist/pulse-build.json', 'dist/report.json', 'dist/report.html']) {
       assert.ok(files.has(path), `Missing kit file: ${path}`)
@@ -60,6 +66,7 @@ if (mode === 'check') {
     }
     const archive = join('dist', packed.filename)
     const unpack = path => execFileSync('tar', ['-xOf', archive, `package/${path}`], { maxBuffer: 16 * 1024 * 1024 })
+    assert.ok(unpack(pkg.bin['fastly-tick']).toString('utf8').startsWith('#!/usr/bin/env node\n'), 'Installer must have a Node entry point')
     assert.deepEqual(unpack('dist/bin/main.wasm'), wasm, 'Publish the tested Wasm bytes')
     assert.deepEqual(unpack('npm-shrinkwrap.json'), lockBytes)
     const report = JSON.parse(unpack('dist/report.json'))

@@ -164,7 +164,7 @@ Use one bounded delivery state per worker/active interval, not a forever-growing
 
 - Modifications to `pulse-compute/tick`, its adapters, or its existing tests.
 - General scheduler engine, cron syntax, workflow graphs, distributed transactions, multi-cloud support, S3 coordination, automatic PoP leader election, or health-scoring system.
-- General package lowering, `app.use(tick)` middleware, arbitrary dynamic HTTP destinations, or an external worker SDK.
+- General package lowering, `app.use(tick)` middleware, arbitrary dynamic HTTP destinations, or a general external worker SDK. The later [worker source installer](worker.md) is a bounded convenience for the existing authenticated invocation/ACK contract; it adds no registration API or runtime delivery machinery.
 - Worker execution monitoring, completion callbacks, job-result collection, or exactly-once guarantees.
 - Guaranteed 15-second cadence, backfilling missed slots, priority queues, or autonomous timers inside Wasm.
 - A broad evidence archive, new CI bureaucracy, or extra publish/release gates beyond focused proof.
