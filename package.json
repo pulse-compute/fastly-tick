@@ -10,6 +10,7 @@
     "test": "pulse test",
     "test:native": "node test/native.mjs",
     "test:admission": "node --test test/admission.test.mjs",
+    "test:redelivery": "node --test test/redelivery.test.mjs",
     "test:registry": "node --test test/registry.test.mjs",
     "test:native-registry": "node test/native-registry.mjs",
     "test:dispatch": "node --test test/dispatch.test.mjs",
@@ -22,7 +23,7 @@
     "build": "pulse build",
     "build:worker": "node scripts/build-worker.mjs",
     "report": "node scripts/report.mjs",
-    "verify": "npm run typecheck && npm run test:trigger && npm test && npm run build && npm run build:worker && npm run test:admission && npm run test:dispatch && npm run test:registry && npm run report"
+    "verify": "npm run typecheck && npm run test:trigger && npm test && npm run build && npm run build:worker && npm run test:admission && npm run test:dispatch && npm run test:registry && npm run test:redelivery && npm run report"
   },
   "dependencies": {
     "@pulse-compute/provider-fastly": "1.0.0-beta.7",

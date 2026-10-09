@@ -1,12 +1,13 @@
 # FT-04 — bounded registry and UTC slots
 
-FT-04 implements selection and first-attempt delivery records. **Dispatch stays
+FT-04 implements selection and delivery records; [FT-05](redelivery.md) adds
+bounded redelivery and crash recovery. **Dispatch stays
 compiled off** pending Pulse [#250](https://github.com/pulse-compute/pulse/issues/250),
 [#251](https://github.com/pulse-compute/pulse/issues/251), and
 [#252](https://github.com/pulse-compute/pulse/issues/252). The shipped app prepares
 zero-attempt pending records, resolves no worker credentials, and sends nothing.
 An isolated enabled Native build tests the conditional send and ACK path.
-Same-slot redelivery and attempt exhaustion remain FT-05 work. Logging, live
+Same-slot redelivery and attempt exhaustion follow the FT-05 policy. Logging, live
 cadence, trusted PoP filtering, and live smoke retain their existing deferrals;
 known Viceroy KV/CAS failures remain nonblocking.
 
@@ -41,7 +42,7 @@ Pulse KV value. Provisioning the store/registry is an operator action.
 | Enablement | Required boolean; false leaves its delivery record untouched |
 | Interval | Integer multiple of 15,000ms, from 15,000 to 86,400,000ms |
 | ACK timeout | Integer 1–1,000ms; default example 1,000ms |
-| Attempts | Integer 1–3; default example 3; retries land in FT-05 |
+| Attempts | Integer 1–3; default example 3; bounded retry policy in FT-05 |
 | Destination | Exactly `uptime`, `POST`, `/__tick/run`, `UPTIME_TICK_TOKEN` |
 | Custom headers | Unsupported; reject even an empty `headers` object |
 | Document | Schema-bound, at most 8 KiB encoded declared content |
@@ -82,9 +83,9 @@ For the heartbeat's initial UTC time `nowMs`:
 - `runId = id + ':slot:' + scheduledForMs` (timestamp is **milliseconds**).
 - First observation of a worker schedules the latest current slot, including slot
   zero near the epoch. Missed slots are dropped; there is no catch-up loop.
-- ACKed, exhausted, or already attempted current slots do not send again in
-  FT-04. An unattempted prepared record can be conditionally claimed when dispatch
-  is enabled. FT-05 will make attempted pending records eligible for bounded retry.
+- ACKed and exhausted current slots do not send again. An unattempted prepared
+  record can be conditionally claimed when dispatch is enabled. Pending attempted
+  records follow FT-05's retry-time, in-flight and attempt-limit fences.
 - At a strictly newer slot, replace the old record only after its in-flight
   deadline. A future timestamp never authorizes a replacement.
 - Disable/re-enable preserves the record. An interval edit takes effect at a
@@ -104,20 +105,21 @@ attempt. Its version-one value contains:
   "status": "pending",
   "attempts": 0,
   "nextAttemptAtMs": 60000,
-  "inFlightUntilMs": 0
+  "inFlightUntilMs": 0,
+  "droppedScheduledForMs": -1
 }
 ```
 
 A missing record uses `insertIfAbsent`; a replacement/prepared first attempt uses
-CAS with the observed opaque generation. Only confirmed `stored` authorizes a
-send. Conflict, failure and uncertain writes never send or retry immediately.
+CAS with the observed opaque generation. Only confirmed `stored` on an attempt reservation authorizes a
+send; exhaustion writes never send. Conflict, failure and uncertain writes never send or retry immediately.
 Enabling dispatch records attempt one and a deadline of claim time plus the ACK
 timeout plus 500ms before sending. A failure after that claim may consume an
-attempt without a send; the pending record is retained for FT-05 recovery.
+attempt without a send; the pending record is retained for a later heartbeat to recover.
 
 An exact, timely 202 ACK is settled through a fresh read and CAS only if the
-stored slot, interval, attempt, retry timestamp and in-flight deadline still
-match. A newer record cannot be overwritten. `x-tick-dispatch: acked` describes
+stored slot, interval, attempt, retry timestamp, in-flight deadline and
+dropped-slot marker still match. A newer record cannot be overwritten. `x-tick-dispatch: acked` describes
 an observed worker ACK; an uncertain settlement can still leave storage pending.
 Tick never polls for completion or reads the ACK body.
 

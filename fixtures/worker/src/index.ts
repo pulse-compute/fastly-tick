@@ -23,7 +23,7 @@ app.post('/__tick/run', async (ctx) => {
   }
   const token = await ctx.secret.get('UPTIME_TICK_TOKEN')
   if (!token || authorization !== 'Bearer ' + token) return ctx.text('rejected', { status: 401 })
-  if (attempt !== '1') return ctx.text('invalid invocation', { status: 400 })
+  if (attempt !== '1' && attempt !== '2' && attempt !== '3') return ctx.text('invalid invocation', { status: 400 })
   const input = await ctx.req.json<Invocation>('fixture.Invocation')
   if (input.worker !== 'uptime' || input.scheduledForMs < 0 ||
       input.scheduledForMs > 253402300799999 || input.scheduledForMs % 15000 !== 0 ||

@@ -136,6 +136,9 @@ app.get('/__tick/probe', async (ctx) => {
     let considered = 0
     let selected = 0
     let sends = 0
+    let redeliveries = 0
+    let exhausted = 0
+    let dropped = 0
     const beforeRegistry = await ctx.time.now()
     if (beforeRegistry.status !== 'ok' || beforeRegistry.unixEpochMs < clock.unixEpochMs ||
         beforeRegistry.unixEpochMs - clock.unixEpochMs >= kvBudgetMs) registryStatus = 'budget-exhausted'
@@ -195,6 +198,12 @@ app.get('/__tick/probe', async (ctx) => {
               const deliveryRead = await deliveries.getVersioned(deliveryKey)
               let eligible = deliveryRead.status === 'not-found'
               let ready = false
+              let retry = false
+              let retire = false
+              let attemptNumber = 1
+              let previousRetryAtMs = scheduledForMs
+              let droppedScheduledForMs = -1
+              let dropping = false
               if (deliveryRead.status === 'found') {
                 ctx.state.set('tickPhase', 'delivery')
                 ctx.encodeJson(deliveryRead.value, 'tick.Delivery')
@@ -206,28 +215,47 @@ app.get('/__tick/probe', async (ctx) => {
                     old.attempts < 0 || old.attempts > 3 || old.attempts % 1 !== 0 ||
                     old.nextAttemptAtMs < 0 || old.nextAttemptAtMs > 253402300799999 || old.nextAttemptAtMs % 1 !== 0 ||
                     old.inFlightUntilMs < 0 || old.inFlightUntilMs > 253402300799999 || old.inFlightUntilMs % 1 !== 0 ||
-                    (old.status === 'acked' && old.attempts === 0)) registryStatus = 'invalid-delivery'
+                    (old.status === 'acked' && old.attempts === 0) ||
+                    (old.droppedScheduledForMs !== undefined && (old.droppedScheduledForMs < -1 ||
+                     old.droppedScheduledForMs >= old.scheduledForMs || old.droppedScheduledForMs % 1 !== 0))) registryStatus = 'invalid-delivery'
                 else {
                   // Newer UTC slots replace older records after their in-flight deadline.
                   // A cadence edit cannot re-send the same or an earlier timestamp.
                   eligible = old.scheduledForMs < scheduledForMs && old.inFlightUntilMs <= beforeRead.unixEpochMs
                   ready = old.runId === runId && old.everyMs === item.everyMs && old.status === 'pending' &&
                     old.attempts === 0 && old.inFlightUntilMs === 0
+                  if (old.droppedScheduledForMs !== undefined) droppedScheduledForMs = old.droppedScheduledForMs
+                  dropping = eligible && old.status === 'pending'
+                  if (dropping) droppedScheduledForMs = old.scheduledForMs
+                  if (dispatchEnabled && old.runId === runId && old.everyMs === item.everyMs &&
+                      old.status === 'pending' && old.attempts > 0 && old.inFlightUntilMs <= beforeRead.unixEpochMs) {
+                    if (old.attempts >= item.maxAttempts) {
+                      retire = true
+                      attemptNumber = old.attempts
+                      previousRetryAtMs = old.nextAttemptAtMs
+                    } else if (old.nextAttemptAtMs <= beforeRead.unixEpochMs) {
+                      retry = true
+                      attemptNumber = old.attempts + 1
+                    }
+                  }
                 }
               }
-              if (eligible || ready) {
+              if (eligible || ready || retry || retire) {
                 const beforeWrite = await ctx.time.now()
                 if (beforeWrite.status !== 'ok' || beforeWrite.unixEpochMs < beforeRead.unixEpochMs ||
                     beforeWrite.unixEpochMs - clock.unixEpochMs >= kvBudgetMs) registryStatus = 'budget-exhausted'
-                else if (scheduledForMs + item.everyMs > 253402300799999) registryStatus = 'invalid-slot'
+                else if (scheduledForMs + item.everyMs > 253402300799999 ||
+                         beforeWrite.unixEpochMs + resolutionMs > 253402300799999) registryStatus = 'invalid-slot'
                 else {
-                  // Disabled dispatch prepares zero-attempt records. Enabling claims
-                  // attempt one before sending; a crash leaves a pending record.
+                  // Reserve each attempt before send. Retiring a last crashed
+                  // attempt is a conditional state change with no worker request.
                   const candidateDelivery = {
-                    version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: 'pending',
-                    attempts: dispatchEnabled ? 1 : 0,
-                    nextAttemptAtMs: dispatchEnabled ? beforeWrite.unixEpochMs + resolutionMs : scheduledForMs,
-                    inFlightUntilMs: dispatchEnabled ? beforeWrite.unixEpochMs + item.ackTimeoutMs + 500 : 0,
+                    version: 1, runId, scheduledForMs, everyMs: item.everyMs,
+                    status: retire ? 'exhausted' : 'pending',
+                    attempts: dispatchEnabled ? attemptNumber : 0,
+                    nextAttemptAtMs: retire ? previousRetryAtMs : dispatchEnabled ? beforeWrite.unixEpochMs + resolutionMs : scheduledForMs,
+                    inFlightUntilMs: dispatchEnabled && !retire ? beforeWrite.unixEpochMs + item.ackTimeoutMs + 500 : 0,
+                    droppedScheduledForMs,
                   }
                   let claimed = 'not-stored'
                   if (ready && !dispatchEnabled) claimed = 'prepared'
@@ -240,7 +268,9 @@ app.get('/__tick/probe', async (ctx) => {
                   }
                   if (claimed === 'stored' || claimed === 'prepared') {
                     selected++
-                    if (dispatchEnabled) {
+                    if (dropping && claimed === 'stored') dropped++
+                    if (retire) { exhausted++; dispatch = 'exhausted' }
+                    else if (dispatchEnabled) {
                       const workerToken = await ctx.secret.get('UPTIME_TICK_TOKEN')
                       let validToken = true
                       if (!workerToken || workerToken.length < 32 || workerToken.length > 256) validToken = false
@@ -254,18 +284,19 @@ app.get('/__tick/probe', async (ctx) => {
                         const beforeSend = await ctx.time.now()
                         if (beforeSend.status !== 'ok' || beforeSend.unixEpochMs < beforeWrite.unixEpochMs) dispatch = 'clock-unavailable'
                         else if (beforeSend.unixEpochMs - clock.unixEpochMs >= requestWorkBudgetMs - item.ackTimeoutMs - 500 ||
-                                 beforeSend.unixEpochMs >= candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
+                                 beforeSend.unixEpochMs + item.ackTimeoutMs > candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
                         else {
                           // Only the compiled destination and reserved headers have authority.
                           const response = await ctx.fetch('https://uptime.example.com/__tick/run', {
                             method: 'POST', timeoutMs: item.ackTimeoutMs,
                             headers: {
                               authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
-                              'x-tick-attempt': '1', 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
+                              'x-tick-attempt': '' + attemptNumber, 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
                             },
                             body: '{"worker":"' + item.id + '","scheduledForMs":' + scheduledForMs + '}',
                           })
                           sends++
+                          if (attemptNumber > 1) redeliveries++
                           const afterAck = await ctx.time.now()
                           if (afterAck.status !== 'ok' || afterAck.unixEpochMs < beforeSend.unixEpochMs) dispatch = 'clock-unavailable'
                           else {
@@ -274,22 +305,26 @@ app.get('/__tick/probe', async (ctx) => {
                             else if (response.status === 202 && response.header('x-tick-invocation-id') === runId) dispatch = 'acked'
                             else dispatch = 'unacknowledged'
                             // Settle only the identical attempt under its current generation.
-                            if (dispatch === 'acked' && afterAck.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
+                            const outcome = dispatch === 'acked' ? 'acked' : attemptNumber >= item.maxAttempts ? 'exhausted' : 'pending'
+                            if (afterAck.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
                               const receipt = await deliveries.getVersioned(deliveryKey)
                               if (receipt.status === 'found') {
                                 ctx.state.set('tickPhase', 'delivery')
                                 ctx.encodeJson(receipt.value, 'tick.Delivery')
                                 if (receipt.value.version === 1 && receipt.value.runId === runId && receipt.value.status === 'pending' &&
-                                    receipt.value.attempts === 1 && receipt.value.inFlightUntilMs === candidateDelivery.inFlightUntilMs &&
+                                    receipt.value.attempts === attemptNumber && receipt.value.inFlightUntilMs === candidateDelivery.inFlightUntilMs &&
                                     receipt.value.everyMs === item.everyMs && receipt.value.scheduledForMs === scheduledForMs &&
-                                    receipt.value.nextAttemptAtMs === candidateDelivery.nextAttemptAtMs) {
+                                    receipt.value.nextAttemptAtMs === candidateDelivery.nextAttemptAtMs &&
+                                    receipt.value.droppedScheduledForMs === candidateDelivery.droppedScheduledForMs) {
                                   const beforeSettle = await ctx.time.now()
                                   if (beforeSettle.status === 'ok' && beforeSettle.unixEpochMs >= afterAck.unixEpochMs &&
                                       beforeSettle.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
-                                    await deliveries.compareAndSwap(deliveryKey, receipt.generation, {
-                                      version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: 'acked',
-                                      attempts: 1, nextAttemptAtMs: candidateDelivery.nextAttemptAtMs, inFlightUntilMs: 0,
+                                    const settled = await deliveries.compareAndSwap(deliveryKey, receipt.generation, {
+                                      version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: outcome,
+                                      attempts: attemptNumber, nextAttemptAtMs: candidateDelivery.nextAttemptAtMs, inFlightUntilMs: 0,
+                                      droppedScheduledForMs,
                                     })
+                                    if (settled.status === 'stored' && outcome === 'exhausted') exhausted++
                                   }
                                 }
                               }
@@ -315,6 +350,12 @@ app.get('/__tick/probe', async (ctx) => {
               const deliveryRead = await deliveries.getVersioned(deliveryKey)
               let eligible = deliveryRead.status === 'not-found'
               let ready = false
+              let retry = false
+              let retire = false
+              let attemptNumber = 1
+              let previousRetryAtMs = scheduledForMs
+              let droppedScheduledForMs = -1
+              let dropping = false
               if (deliveryRead.status === 'found') {
                 ctx.state.set('tickPhase', 'delivery')
                 ctx.encodeJson(deliveryRead.value, 'tick.Delivery')
@@ -326,28 +367,47 @@ app.get('/__tick/probe', async (ctx) => {
                     old.attempts < 0 || old.attempts > 3 || old.attempts % 1 !== 0 ||
                     old.nextAttemptAtMs < 0 || old.nextAttemptAtMs > 253402300799999 || old.nextAttemptAtMs % 1 !== 0 ||
                     old.inFlightUntilMs < 0 || old.inFlightUntilMs > 253402300799999 || old.inFlightUntilMs % 1 !== 0 ||
-                    (old.status === 'acked' && old.attempts === 0)) registryStatus = 'invalid-delivery'
+                    (old.status === 'acked' && old.attempts === 0) ||
+                    (old.droppedScheduledForMs !== undefined && (old.droppedScheduledForMs < -1 ||
+                     old.droppedScheduledForMs >= old.scheduledForMs || old.droppedScheduledForMs % 1 !== 0))) registryStatus = 'invalid-delivery'
                 else {
                   // Newer UTC slots replace older records after their in-flight deadline.
                   // A cadence edit cannot re-send the same or an earlier timestamp.
                   eligible = old.scheduledForMs < scheduledForMs && old.inFlightUntilMs <= beforeRead.unixEpochMs
                   ready = old.runId === runId && old.everyMs === item.everyMs && old.status === 'pending' &&
                     old.attempts === 0 && old.inFlightUntilMs === 0
+                  if (old.droppedScheduledForMs !== undefined) droppedScheduledForMs = old.droppedScheduledForMs
+                  dropping = eligible && old.status === 'pending'
+                  if (dropping) droppedScheduledForMs = old.scheduledForMs
+                  if (dispatchEnabled && old.runId === runId && old.everyMs === item.everyMs &&
+                      old.status === 'pending' && old.attempts > 0 && old.inFlightUntilMs <= beforeRead.unixEpochMs) {
+                    if (old.attempts >= item.maxAttempts) {
+                      retire = true
+                      attemptNumber = old.attempts
+                      previousRetryAtMs = old.nextAttemptAtMs
+                    } else if (old.nextAttemptAtMs <= beforeRead.unixEpochMs) {
+                      retry = true
+                      attemptNumber = old.attempts + 1
+                    }
+                  }
                 }
               }
-              if (eligible || ready) {
+              if (eligible || ready || retry || retire) {
                 const beforeWrite = await ctx.time.now()
                 if (beforeWrite.status !== 'ok' || beforeWrite.unixEpochMs < beforeRead.unixEpochMs ||
                     beforeWrite.unixEpochMs - clock.unixEpochMs >= kvBudgetMs) registryStatus = 'budget-exhausted'
-                else if (scheduledForMs + item.everyMs > 253402300799999) registryStatus = 'invalid-slot'
+                else if (scheduledForMs + item.everyMs > 253402300799999 ||
+                         beforeWrite.unixEpochMs + resolutionMs > 253402300799999) registryStatus = 'invalid-slot'
                 else {
-                  // Disabled dispatch prepares zero-attempt records. Enabling claims
-                  // attempt one before sending; a crash leaves a pending record.
+                  // Reserve each attempt before send. Retiring a last crashed
+                  // attempt is a conditional state change with no worker request.
                   const candidateDelivery = {
-                    version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: 'pending',
-                    attempts: dispatchEnabled ? 1 : 0,
-                    nextAttemptAtMs: dispatchEnabled ? beforeWrite.unixEpochMs + resolutionMs : scheduledForMs,
-                    inFlightUntilMs: dispatchEnabled ? beforeWrite.unixEpochMs + item.ackTimeoutMs + 500 : 0,
+                    version: 1, runId, scheduledForMs, everyMs: item.everyMs,
+                    status: retire ? 'exhausted' : 'pending',
+                    attempts: dispatchEnabled ? attemptNumber : 0,
+                    nextAttemptAtMs: retire ? previousRetryAtMs : dispatchEnabled ? beforeWrite.unixEpochMs + resolutionMs : scheduledForMs,
+                    inFlightUntilMs: dispatchEnabled && !retire ? beforeWrite.unixEpochMs + item.ackTimeoutMs + 500 : 0,
+                    droppedScheduledForMs,
                   }
                   let claimed = 'not-stored'
                   if (ready && !dispatchEnabled) claimed = 'prepared'
@@ -360,7 +420,9 @@ app.get('/__tick/probe', async (ctx) => {
                   }
                   if (claimed === 'stored' || claimed === 'prepared') {
                     selected++
-                    if (dispatchEnabled) {
+                    if (dropping && claimed === 'stored') dropped++
+                    if (retire) { exhausted++; dispatch = 'exhausted' }
+                    else if (dispatchEnabled) {
                       const workerToken = await ctx.secret.get('UPTIME_TICK_TOKEN')
                       let validToken = true
                       if (!workerToken || workerToken.length < 32 || workerToken.length > 256) validToken = false
@@ -374,18 +436,19 @@ app.get('/__tick/probe', async (ctx) => {
                         const beforeSend = await ctx.time.now()
                         if (beforeSend.status !== 'ok' || beforeSend.unixEpochMs < beforeWrite.unixEpochMs) dispatch = 'clock-unavailable'
                         else if (beforeSend.unixEpochMs - clock.unixEpochMs >= requestWorkBudgetMs - item.ackTimeoutMs - 500 ||
-                                 beforeSend.unixEpochMs >= candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
+                                 beforeSend.unixEpochMs + item.ackTimeoutMs > candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
                         else {
                           // Only the compiled destination and reserved headers have authority.
                           const response = await ctx.fetch('https://uptime.example.com/__tick/run', {
                             method: 'POST', timeoutMs: item.ackTimeoutMs,
                             headers: {
                               authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
-                              'x-tick-attempt': '1', 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
+                              'x-tick-attempt': '' + attemptNumber, 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
                             },
                             body: '{"worker":"' + item.id + '","scheduledForMs":' + scheduledForMs + '}',
                           })
                           sends++
+                          if (attemptNumber > 1) redeliveries++
                           const afterAck = await ctx.time.now()
                           if (afterAck.status !== 'ok' || afterAck.unixEpochMs < beforeSend.unixEpochMs) dispatch = 'clock-unavailable'
                           else {
@@ -394,22 +457,26 @@ app.get('/__tick/probe', async (ctx) => {
                             else if (response.status === 202 && response.header('x-tick-invocation-id') === runId) dispatch = 'acked'
                             else dispatch = 'unacknowledged'
                             // Settle only the identical attempt under its current generation.
-                            if (dispatch === 'acked' && afterAck.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
+                            const outcome = dispatch === 'acked' ? 'acked' : attemptNumber >= item.maxAttempts ? 'exhausted' : 'pending'
+                            if (afterAck.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
                               const receipt = await deliveries.getVersioned(deliveryKey)
                               if (receipt.status === 'found') {
                                 ctx.state.set('tickPhase', 'delivery')
                                 ctx.encodeJson(receipt.value, 'tick.Delivery')
                                 if (receipt.value.version === 1 && receipt.value.runId === runId && receipt.value.status === 'pending' &&
-                                    receipt.value.attempts === 1 && receipt.value.inFlightUntilMs === candidateDelivery.inFlightUntilMs &&
+                                    receipt.value.attempts === attemptNumber && receipt.value.inFlightUntilMs === candidateDelivery.inFlightUntilMs &&
                                     receipt.value.everyMs === item.everyMs && receipt.value.scheduledForMs === scheduledForMs &&
-                                    receipt.value.nextAttemptAtMs === candidateDelivery.nextAttemptAtMs) {
+                                    receipt.value.nextAttemptAtMs === candidateDelivery.nextAttemptAtMs &&
+                                    receipt.value.droppedScheduledForMs === candidateDelivery.droppedScheduledForMs) {
                                   const beforeSettle = await ctx.time.now()
                                   if (beforeSettle.status === 'ok' && beforeSettle.unixEpochMs >= afterAck.unixEpochMs &&
                                       beforeSettle.unixEpochMs - clock.unixEpochMs < requestWorkBudgetMs - 500) {
-                                    await deliveries.compareAndSwap(deliveryKey, receipt.generation, {
-                                      version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: 'acked',
-                                      attempts: 1, nextAttemptAtMs: candidateDelivery.nextAttemptAtMs, inFlightUntilMs: 0,
+                                    const settled = await deliveries.compareAndSwap(deliveryKey, receipt.generation, {
+                                      version: 1, runId, scheduledForMs, everyMs: item.everyMs, status: outcome,
+                                      attempts: attemptNumber, nextAttemptAtMs: candidateDelivery.nextAttemptAtMs, inFlightUntilMs: 0,
+                                      droppedScheduledForMs,
                                     })
+                                    if (settled.status === 'stored' && outcome === 'exhausted') exhausted++
                                   }
                                 }
                               }
@@ -434,6 +501,7 @@ app.get('/__tick/probe', async (ctx) => {
         'x-tick-dispatch': dispatch, 'x-tick-ack-latency-ms': '' + ackLatencyMs,
         'x-tick-registry': registryStatus, 'x-tick-workers-considered': '' + considered,
         'x-tick-workers-selected': '' + selected, 'x-tick-sends': '' + sends,
+        'x-tick-redeliveries': '' + redeliveries, 'x-tick-exhausted': '' + exhausted, 'x-tick-dropped': '' + dropped,
       } })
     }
     return ctx.text('healthy', { headers: {
@@ -442,6 +510,7 @@ app.get('/__tick/probe', async (ctx) => {
       'x-tick-dispatch': dispatch,
       'x-tick-registry': registryStatus, 'x-tick-workers-considered': '' + considered,
       'x-tick-workers-selected': '' + selected, 'x-tick-sends': '' + sends,
+      'x-tick-redeliveries': '' + redeliveries, 'x-tick-exhausted': '' + exhausted, 'x-tick-dropped': '' + dropped,
     } })
   }
   return ctx.text('healthy', {

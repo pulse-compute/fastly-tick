@@ -18,5 +18,5 @@ export const delivery = (state, id = 'uptime') => {
 }
 export const record = (id = 'uptime', overrides = {}) => ({
   version: 1, runId: id + ':slot:60000', scheduledForMs: 60000, everyMs: 60000,
-  status: 'acked', attempts: 1, nextAttemptAtMs: 100000, inFlightUntilMs: 0, ...overrides,
+  status: 'acked', attempts: 1, nextAttemptAtMs: 100000, inFlightUntilMs: 0, droppedScheduledForMs: -1, ...overrides,
 })

@@ -13,7 +13,8 @@ FT-03 adds [static dispatch and an independent worker fixture](docs/dispatch.md)
 Dispatch is disabled while the pinned Native provider lacks recoverable fetch
 errors and an enforced ACK timeout. FT-04 adds [bounded registry selection and stable UTC slots](docs/registry.md),
 with one conditional delivery record per worker and a rotating two-worker cap.
-Redelivery remains FT-05 work. The existing
+FT-05 adds [bounded redelivery and crash recovery](docs/redelivery.md), preserving
+run IDs across attempts and stopping at ACK or exhaustion. The existing
 `pulse-compute/tick` project is independent.
 
 The strict local Viceroy contention test has reproduced duplicate admitted
@@ -30,7 +31,7 @@ npm ci --ignore-scripts
 npm run verify
 ```
 
-This runs TypeScript validation, focused provider/admission/dispatch/registry fixtures,
+This runs TypeScript validation, focused provider/admission/dispatch/registry/redelivery fixtures,
 both Native builds, and receiver JSON/HTML reports. `.pulse/config.ts` explicitly selects `host: 'fastly'`
 and `target: 'native'`. There is no automatic JavaScript fallback.
 
