@@ -9,12 +9,14 @@
     "typecheck": "tsc --noEmit",
     "test": "pulse test",
     "test:native": "node test/native.mjs",
+    "test:admission": "node --test test/admission.test.mjs",
+    "test:native-admission": "node test/native-admission.mjs",
     "test:native-logs": "node test/native.mjs --require-logs",
     "test:trigger": "node --test test/trigger.test.mjs",
     "dev": "pulse dev",
     "build": "pulse build",
     "report": "node scripts/report.mjs",
-    "verify": "npm run typecheck && npm run test:trigger && npm test && npm run build && npm run report"
+    "verify": "npm run typecheck && npm run test:trigger && npm test && npm run build && npm run test:admission && npm run report"
   },
   "dependencies": {
     "@pulse-compute/provider-fastly": "1.0.0-beta.7",

@@ -4,10 +4,17 @@ A small Pulse → Fastly Native Wasm receiver for best-effort heartbeat scheduli
 The authoritative [v0.1 specification](docs/spec.md) defines the full scope.
 
 **FT-00 provides the authenticated receiver and build proof.** FT-01 adds
-[trigger setup and observation instructions](docs/trigger.md); live verification
-and Native log delivery remain pending. PoP/KV admission, registry scheduling,
-and worker delivery follow in FT-02–FT-06. The existing `pulse-compute/tick`
-project is independent.
+[trigger setup and observation instructions](docs/trigger.md). Logging and live
+cadence validation are explicitly deferred and do not block implementation.
+FT-02 adds [conditional KV sweep admission](docs/admission.md); trusted PoP
+filtering remains deferred, with all PoPs participating. Known Viceroy KV/CAS
+failures are documented and nonblocking; live KV smoke testing is deferred.
+Registry scheduling and worker delivery follow in FT-03–FT-06. The existing
+`pulse-compute/tick` project is independent.
+
+The strict local Viceroy contention test has reproduced duplicate admitted
+requests. The provider also cannot yet enforce a healthy KV timeout inside the
+five-second trigger budget. [FT-02 details](docs/admission.md) preserve both gaps.
 
 ## Build and verify
 
@@ -50,6 +57,12 @@ methods return 404. No token values are returned or logged.
 
 Health means only that the receiver accepted an authenticated probe. It does
 not mean a sweep ran, a worker accepted work, or work completed.
+
+Authenticated responses expose `x-tick-admission`; confirmed, timely winners
+also expose `x-tick-next-sweep-at-ms`. The static defaults are a 15-second sweep
+resolution and a 1,500 ms KV budget fence. The fence prevents starting more work
+after the budget expires; it cannot interrupt an in-flight provider KV wait.
+See [admission behavior and validation limits](docs/admission.md).
 
 ## Execute the emitted Wasm locally
 

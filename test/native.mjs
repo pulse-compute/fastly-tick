@@ -24,6 +24,7 @@ for (const [secrets, cases] of groups) {
     await writeFile(join(directory, 'fastly.toml'), fastly.renderFastlyLocalConfig({
       name: 'fastly-tick-fixture',
       secretStores: { tick_secrets: JSON.parse(secrets) },
+      kvStores: { tick_state: {} },
     }))
     server = await fastly.startFastlyComputeServe({
       launcherKind: 'viceroy-direct',

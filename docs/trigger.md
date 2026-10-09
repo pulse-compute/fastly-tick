@@ -1,16 +1,19 @@
-# FT-01 — trigger setup and live proof
+# FT-01 — trigger setup and deferred live validation
 
-Status: setup code and local HTTP proof are implemented. **Live arrivals,
-site coverage, redeploy behavior, and Native log delivery are not verified.**
-No Fastly account credentials were available during implementation.
+Status: FT-01 implementation is complete. **Logging and live cadence validation
+are explicitly deferred, not blockers for FT-01 or FT-02 implementation.** Live
+arrivals, site coverage, redeploy behavior, and Native log delivery remain
+unverified. No Fastly account credentials were available during implementation.
 
 ## Receiver and dedicated trigger
 
 1. Build the receiver with `npm ci --ignore-scripts && npm run verify`.
    Deploy the reviewed `dist/` candidate to a Compute service using the Fastly
    deployment workflow. Attach the Secret Store using resource-link name
-   `tick_secrets`, containing a strong `TICK_PROBE_TOKEN` value. Configure a
-   receiver domain with working TLS and DNS. This setup must precede the trigger.
+   `tick_secrets`, containing a strong `TICK_PROBE_TOKEN` value. Attach one KV
+   store with resource-link name `tick_state` for [sweep admission](admission.md).
+   Configure a receiver domain with working TLS and DNS. This setup must precede
+   the trigger.
 2. Create a **separate dedicated CDN/VCL service** for the trigger in Fastly.
    Add its distinct domain on an inactive, unlocked draft version. Use the default
    generated VCL and no unrelated backends; existing custom VCL must not reroute
@@ -88,28 +91,30 @@ exact versions and artifact digest. Fastly documents that backend changes reset
 health state; unchanged backend/health-check configuration preserves it. Compare
 the observations with those expectations, including gaps and duplicates.
 
-## Observation and current Native logging blocker
+## Deferred observation and Native logging
 
-The receiver emits an authenticated `fastly_tick.probe` event with a provider
-wall-clock sample, receiver name, and probe kind. The trigger supplies
+The receiver attempts to emit an authenticated `fastly_tick.probe` event with a
+provider wall-clock sample, receiver name, and probe kind. The trigger supplies
 `x-tick-probe-kind: healthcheck`; direct setup/manual requests are kept separate.
 Kind is caller-supplied metadata, **not proof of source or authorization**.
-Receiver PoP is explicitly `null`: FT-02 owns actual identity access. Never use a
-caller header or a warming client's location as executing-PoP evidence.
+Receiver PoP is explicitly `null`: the pinned provider has no trusted executing-PoP
+API, so FT-02 uses all-PoP admission with filtering deferred. Never use a caller
+header or a warming client's location as executing-PoP evidence.
 
 **Pulse beta.7 currently prevents these Native logs from being delivered in
 Viceroy 0.21.1.** Its generated `host_log` calls
 `fastly_log.endpoint_get("stdout")`; Viceroy rejects that reserved endpoint with
 InvalidArgument. Pulse then disables logging for that request. No error reaches
 the application. `--log-stdout` does not change the endpoint lookup rule.
-No provider code is patched in this repository. The failing gate is explicit:
+Validation and repair are deferred to the main Pulse trunk. No provider code is
+patched in this repository. This focused diagnostic currently fails:
 
 ```sh
 PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:native-logs
 ```
 
 `npm run test:native` verifies HTTP behavior only and passes independently.
-Do not report telemetry as working until the gate above passes on a corrected
+Do not report telemetry as working until the diagnostic above passes on a corrected
 Pulse version and the deployed receiver is checked separately.
 
 After a provider fix establishes stdout delivery, collect a short receiver
@@ -127,8 +132,10 @@ not a 15-second per-site guarantee; log loss, multiple sites/IPs, and clock skew
 affect them. An empty sample has unknown gaps, not zero gaps. Preserve a concise
 summary plus deployment identities and delete raw observation logs afterward.
 
-FT-01 closes only after actual live arrivals, warm-up, and redeploy observations
-are recorded. Until then, the implementation PR must not auto-close the ticket.
+The deferred operational checks do not prevent completing FT-01 or proceeding
+with FT-02. They remain unverified until recorded. Known Viceroy KV/CAS failures
+are also nonblocking, with live KV smoke testing deferred by the owner; see
+[FT-02 admission](admission.md).
 
 ## References checked for this implementation
 
