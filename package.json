@@ -1,0 +1,25 @@
+{
+  "name": "fastly-tick",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "^22.14.0 || ^24.0.0" },
+  "scripts": {
+    "doctor": "pulse doctor",
+    "typecheck": "tsc --noEmit",
+    "test": "pulse test",
+    "test:native": "node test/native.mjs",
+    "dev": "pulse dev",
+    "build": "pulse build",
+    "report": "node scripts/report.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run report"
+  },
+  "dependencies": {
+    "@pulse-compute/provider-fastly": "1.0.0-beta.7",
+    "@pulse-compute/pulse": "1.0.0-beta.7"
+  },
+  "devDependencies": {
+    "@pulse-compute/cli": "1.0.0-beta.7",
+    "typescript": "5.9.3"
+  }
+}

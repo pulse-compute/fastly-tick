@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.pulse/reports/
+.pulse/cache/
+.env
+.env.*
+*.tsbuildinfo
+.pulse-report-locks/
