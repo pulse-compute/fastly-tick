@@ -78,7 +78,7 @@ test('observation keeps configured cadence separate from merged measured gaps', 
     { kind: 'healthcheck', atMs: 16000 }, { kind: 'manual', atMs: 9000 },
     { kind: 'healthcheck', atMs: 1000 }, { kind: 'healthcheck', atMs: 50000 },
     { kind: 'healthcheck', atMs: null },
-  ], 'local')
+  ].map(e => ({ event: 'fastly_tick.probe', receiver: 'fastly-tick', ...e })), 'local')
   assert.equal(result.source, 'local')
   assert.equal(result.configuredIntervalMs, 15000)
   assert.equal(result.maxObservedGapMs, 34000)

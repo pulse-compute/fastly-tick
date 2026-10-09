@@ -88,7 +88,12 @@ test('missing, short, excessive and injected worker secrets fail before fetch', 
 })
 
 test('elapsed preparation leaves ACK, overhead and response reserve before send', () => {
-  const result = healthy(receiver(binary, { secretDelayMs: 2500 }), 'budget-exhausted')
+  // Delay only worker credential preparation; slow probe auth now skips before KV.
+  let secretsRead = 0
+  const result = healthy(receiver(binary, {
+    onSecretLookup() { secretsRead++ },
+    realtimeClock() { return { nanoseconds: BigInt(100000 + (secretsRead > 1 ? 2500 : 0)) * 1000000n } },
+  }), 'budget-exhausted')
   assert.deepEqual(result.captured, [])
   assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
 })
@@ -103,7 +108,7 @@ test('late or unmeasurable ACK never accepted; no immediate retry', () => {
   let calls = 0
   const result = healthy(receiver(binary, { realtimeClock() {
     calls++
-    return calls === 8 ? { status: 1 } : { nanoseconds: 100000000000n }
+    return calls === 9 ? { status: 1 } : { nanoseconds: 100000000000n }
   } }), 'clock-unavailable')
   assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
 })

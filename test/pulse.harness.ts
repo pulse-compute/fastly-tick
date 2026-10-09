@@ -4,6 +4,24 @@ const secrets = { TICK_PROBE_TOKEN: 'fixture-only-not-a-credential' }
 export default {
   cases: [
     {
+      name: 'authenticated-status',
+      request: { path: '/__tick/status', headers: { 'x-tick-probe-token': secrets.TICK_PROBE_TOKEN } },
+      secrets,
+      expect: { status: 200, headers: [['cache-control', 'no-store'], ['content-type', 'application/json; charset=utf-8']] },
+    },
+    {
+      name: 'missing-status-token',
+      request: { path: '/__tick/status' },
+      secrets,
+      expect: { status: 401, text: 'unauthorized' },
+    },
+    {
+      name: 'post-is-not-status',
+      request: { method: 'POST', path: '/__tick/status', headers: { 'x-tick-probe-token': secrets.TICK_PROBE_TOKEN } },
+      secrets,
+      expect: { status: 404 },
+    },
+    {
       name: 'healthcheck-tagged-probe',
       request: { path: '/__tick/probe', headers: {
         'x-tick-probe-token': secrets.TICK_PROBE_TOKEN,

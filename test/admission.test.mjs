@@ -215,8 +215,10 @@ test('emitted Wasm: clock failures and rollback fail closed at each admission fe
     [[null], 'clock-unavailable', false],
     [[100000, null], 'clock-unavailable', false],
     [[100000, 99999], 'budget-exhausted', false],
-    [[100000, 100000, null], 'clock-unavailable', true],
-    [[100000, 100000, 99999], 'claimed-too-late', true],
+    [[100000, 100000, null], 'clock-unavailable', false],
+    [[100000, 100000, 99999], 'budget-exhausted', false],
+    [[100000, 100000, 100000, null], 'clock-unavailable', true],
+    [[100000, 100000, 100000, 99999], 'claimed-too-late', true],
   ]) {
     let index = 0
     const result = healthy(execute({ realtimeClock() {
