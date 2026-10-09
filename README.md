@@ -3,9 +3,11 @@
 A small Pulse → Fastly Native Wasm receiver for best-effort heartbeat scheduling.
 The authoritative [v0.1 specification](docs/spec.md) defines the full scope.
 
-**FT-00 implements only the authenticated receiver and build proof.** Trigger
-wiring, PoP/KV admission, registry scheduling, and worker delivery follow in
-FT-01–FT-06. The existing `pulse-compute/tick` project is independent.
+**FT-00 provides the authenticated receiver and build proof.** FT-01 adds
+[trigger setup and observation instructions](docs/trigger.md); live verification
+and Native log delivery remain pending. PoP/KV admission, registry scheduling,
+and worker delivery follow in FT-02–FT-06. The existing `pulse-compute/tick`
+project is independent.
 
 ## Build and verify
 
@@ -83,7 +85,7 @@ absent header produced an empty HTTP 200, while the Pulse fixture returned the
 intended 401. This app uses the supported normalized `ctx.req.headers` list with
 a literal scan bound instead. Both runners verify missing-header rejection.
 No Pulse compiler or provider code is patched. Retain the regression test when
-upgrading Pulse.
+upgrading Pulse. Tracked in [Pulse #246](https://github.com/pulse-compute/pulse/issues/246).
 
 The raw canonical fixture also preserves supplied header-name casing, whereas
 the emitted Fastly header-list adapter normalizes names to lowercase. Local

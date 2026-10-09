@@ -30,6 +30,7 @@ for (const [secrets, cases] of groups) {
       viceroyBinary: process.env.PULSE_VICEROY_BIN,
       packageRoot: directory,
       wasmFile: resolve('dist/bin/main.wasm'),
+      extraArgs: ['--log-stdout', '-v'],
       startTimeoutMs: 15000,
     })
     for (const test of cases) {
@@ -47,6 +48,15 @@ for (const [secrets, cases] of groups) {
       }
       console.log(`ok - native ${test.name}`)
       passed++
+    }
+    // Logging must not disclose any fixture credentials.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const logs = server.logs.stdout + server.logs.stderr
+    for (const value of Object.values(JSON.parse(secrets))) {
+      if (value) assert.ok(!logs.includes(value), 'Secret leaked into native logs')
+    }
+    if (process.argv.includes('--require-logs') && cases.some((test) => test.expect.status === 200)) {
+      assert.ok(logs.includes('fastly_tick.probe'), 'Authenticated Native probe emitted no observation')
     }
   } finally {
     if (server) await server.stop()

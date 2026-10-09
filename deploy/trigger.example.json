@@ -1,0 +1,13 @@
+{
+  "triggerServiceId": "REPLACE_TRIGGER_SERVICE_ID",
+  "receiverServiceId": "REPLACE_RECEIVER_SERVICE_ID",
+  "version": 1,
+  "triggerHost": "trigger.example.com",
+  "receiverHost": "tick.example.com",
+  "healthcheckTimeoutMs": 5000,
+  "kvBudgetMs": 1500,
+  "dispatches": 2,
+  "ackTimeoutMs": 1000,
+  "overheadMs": 500,
+  "responseReserveMs": 1000
+}

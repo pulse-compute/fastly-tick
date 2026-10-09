@@ -18,7 +18,8 @@ assert.equal(build.providerTarget.wasm.sha256, sha256)
 assert.equal(build.providerTarget.wasm.bytes, wasm.length)
 const imports = WebAssembly.Module.imports(new WebAssembly.Module(wasm))
 assert.ok(imports.length > 0)
-assert.ok(imports.every(({ module }) => module.startsWith('fastly_')), 'FT-00 must contain only Fastly host imports')
+assert.ok(imports.every(({ module, name }) => module.startsWith('fastly_') ||
+  (module === 'wasi_snapshot_preview1' && name === 'clock_time_get')), 'Only Fastly host imports and the explicit wall clock are allowed')
 
 const json = execFileSync(process.execPath, [cli, 'report', '--json'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
 const report = JSON.parse(json)
