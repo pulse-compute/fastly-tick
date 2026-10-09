@@ -1,0 +1,13 @@
+# Local Fastly CLI fixture. pulse build emits the deployment manifest in dist/.
+# This public test value is never a production credential or resource setup.
+manifest_version = 3
+name = "fastly-tick"
+description = "Best-effort heartbeat receiver"
+authors = []
+language = "other"
+
+[scripts]
+build = "npm run build"
+
+[local_server.secret_stores]
+tick_secrets = [{ key = "TICK_PROBE_TOKEN", data = "fixture-only-not-a-credential" }]
