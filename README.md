@@ -24,7 +24,7 @@ npm ci --ignore-scripts
 npm run verify
 ```
 
-`verify` runs `check` (types, trigger configuration/behavior and canonical app
+`verify` runs `check` (package/lock metadata, types, trigger configuration/behavior and canonical app
 fixtures) before `verify:native` (receiver/worker builds, injected Fastly ABI
 fixtures and reports). The dispatch, registry, retry and operations suites share
 one freshly built enabled receiver; admission additionally builds its distinct
@@ -33,12 +33,13 @@ fail-closed PoP variant. Standalone `test:dispatch`, `test:registry`,
 `.pulse/config.ts` explicitly selects Fastly **Native**, with no JS fallback.
 
 The single [CI workflow](.github/workflows/verify.yml) uses these same commands on
-PRs and main. It needs no deployment credentials and retains one successful
+PRs and main, followed by the npm tarball gate. It needs no deployment credentials and retains one successful
 candidate per run for **seven days**. Download it from that private Actions run,
 unzip into an empty directory, and retain its `dist/` layout and lockfile. PR
 artifacts identify the tested merge commit; they are not automatically promoted.
 Access follows repository/Actions permissions. Regenerate expired candidates
-from the reviewed commit; there is no npm publication or public release.
+from the reviewed commit. The tarball is also included in this private candidate;
+publication is a separate manual action.
 
 | Candidate file | Purpose |
 | --- | --- |
@@ -47,6 +48,7 @@ from the reviewed commit; there is no npm publication or public release.
 | `dist/pulse-build.json` | Native target, compiler and binding provenance |
 | `dist/report.json`, `dist/report.html` | Reports matched to final Wasm digest and bytes |
 | `dist/artifact.json`, `package-lock.json` | Commit/dirty state, Node/tool versions and seven distributed file hashes; pinned dependency graph |
+| `dist/pulse-compute-fastly-tick-<version>.tgz` | Validated npm application kit |
 
 `report` checks the actual module's host imports, Native identity and final report
 hash/size before writing these files. Run it after every build. An exported
@@ -62,6 +64,48 @@ commands and their known failures remain in [admission](docs/admission.md) and
 [dispatch](docs/dispatch.md), outside the normal CI gate. For manual inspection,
 `fastly compute serve --file dist/bin/main.wasm` uses the root local fixture
 manifest and public fixture token; never deploy that manifest or credential.
+
+## npm package and manual publication
+
+**`@pulse-compute/fastly-tick`** packages the receiver source/configuration, focused
+tests, worker fixture source, setup examples, docs and the actual Native Wasm /
+digest / build provenance / JSON and HTML reports. Its allowlist excludes local
+settings, credentials, compiler caches, canonical intermediate builds and worker
+test binaries. The root `fastly.toml` remains a public-token local fixture;
+deploy only `dist/fastly.toml`. The Actions-only `dist/artifact.json` is not part
+of the npm kit because it references the repository lockfile layout.
+
+After `npm run verify`, run `npm run pack:release` to create and check the tarball.
+It ships the reviewed lockfile as `npm-shrinkwrap.json`. To work from the downloaded
+kit in an empty directory, extract it with `tar -xzf <tarball> --strip-components=1`,
+then run `npm ci --ignore-scripts` and `npm run verify`. Installing it into another
+project also makes its precompiled deployment files available under
+`node_modules/@pulse-compute/fastly-tick/dist/`. Dispatch and live proof retain the
+same restrictions as the source checkout.
+
+PR/main CI exposes the stable **`verify`** check, including metadata/lock agreement,
+Native fixtures/report identity and actual tarball contents/Wasm checks. Require
+`verify` in the main branch rule to enforce the merge gate. Repository rules are
+an administrator setting, separate from the workflow file.
+
+To publish, merge the version/name/lock changes first, then run **Publish npm
+application kit** from Actions on **main**. Enter the exact committed version
+(currently `0.1.0`), choose `latest`, `beta` or `next`, and select npm access.
+Access defaults to **restricted**; selecting **public** exposes the kit contents
+regardless of repository visibility. Private scoped packages require an npm plan
+that supports them. Bump versions in a reviewed PR; the workflow never invents
+or rewrites a version, creates tags, or publishes on pushes. It validates/builds
+once and publishes that same checked tarball.
+
+Use the GitHub environment **`npm`**. For first-package bootstrap, choose `token`
+and configure a publish-capable **`NPM_TOKEN`** secret there. Once the package
+exists, configure its npm [trusted publisher](https://docs.npmjs.com/trusted-publishers/)
+as owner **`pulse-compute`**, repository **`fastly-tick`**, workflow **`publish.yml`**,
+environment **`npm`**, with direct publishing allowed; then choose `trusted`.
+The pinned Node version provides an OIDC-capable npm CLI. npm provenance is
+unavailable for a private source repository, including public-package publishes;
+eligible trusted publishes generate it automatically once the repo is public.
+No publication or repository visibility change occurs when this PR is merged.
 
 ## Receiver and worker setup
 

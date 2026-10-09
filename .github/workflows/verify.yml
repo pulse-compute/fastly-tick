@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   verify:
+    name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,6 +30,8 @@ jobs:
         run: npm run check
       - name: Native builds, provider fixtures and exact artifact reports
         run: npm run verify:native
+      - name: npm application kit contents and exact packaged Wasm
+        run: npm run pack:release
       - name: Retain private build candidate for seven days
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -44,3 +47,4 @@ jobs:
             dist/report.html
             dist/artifact.json
             package-lock.json
+            dist/pulse-compute-fastly-tick-*.tgz

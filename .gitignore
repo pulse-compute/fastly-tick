@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 .pulse-report-locks/
 deploy/*.local.json
+npm-shrinkwrap.json
