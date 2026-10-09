@@ -35,7 +35,7 @@ Content-Type: application/json
 
 This fixed invocation is the original FT-03 transport example.
 [FT-04](registry.md) now supplies bounded registry selection, stable UTC slot IDs,
-conditional first-attempt records and ACK settlement. FT-05 supplies bounded
+conditional first-attempt records and ACK settlement. [FT-05](redelivery.md) supplies bounded
 redelivery; the current path never retries within a sweep. No incoming header can replace any protocol/auth header.
 
 Only status **202** with `x-tick-invocation-id` exactly matching the request is

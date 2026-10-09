@@ -12,6 +12,7 @@ export interface Registry { schema: string; workers: Worker[] }
 export interface Delivery {
   version: number; runId: string; scheduledForMs: number; everyMs: number
   status: string; attempts: number; nextAttemptAtMs: number; inFlightUntilMs: number
+  droppedScheduledForMs?: number
 }
 
 export default defineSchemaRegistry({

@@ -138,7 +138,7 @@ test('independent worker rejects bad auth, protocol and payload without acceptan
     [{ ...base, headers: {} }, 401],
     [{ ...base, headers: { ...base.headers, authorization: 'Bearer wrong' } }, 401],
     [{ ...base, headers: { ...base.headers, 'x-tick-invocation-id': 'other' } }, 400],
-    [{ ...base, headers: { ...base.headers, 'x-tick-attempt': '2' } }, 400],
+    [{ ...base, headers: { ...base.headers, 'x-tick-attempt': '4' } }, 400],
     [{ ...base, body: 'not json' }, 400],
     [{ ...base, body: '{"worker":"other","scheduledForMs":60000}' }, 400],
   ]) {

@@ -89,8 +89,8 @@ test('UTC slot boundary and missed windows keep IDs stable without catch-up', ()
   }
 })
 
-test('acked/exhausted/attempted slots are not re-sent in FT-04; next slot replaces one key', () => {
-  for (const status of ['acked', 'pending', 'exhausted']) {
+test('acked/exhausted slots are not re-sent; next slot replaces one key', () => {
+  for (const status of ['acked', 'exhausted']) {
     const state = seed(registryState(), deliveryKey('uptime'), record('uptime', { status }))
     const same = healthy(send(state))
     assert.deepEqual(same.outboundRequests, [])
