@@ -8,7 +8,7 @@
   },
   "scripts": {
     "doctor": "pulse doctor",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/generate-worker-fixture.mjs && tsc --noEmit",
     "test": "pulse test",
     "test:native": "node test/native.mjs",
     "test:admission": "node --test test/admission.test.mjs",
@@ -27,11 +27,12 @@
     "build": "pulse build",
     "build:worker": "node scripts/build-worker.mjs",
     "report": "node scripts/report.mjs",
-    "check": "npm run check:package && npm run typecheck && npm run test:trigger && npm test",
+    "check": "npm run check:package && npm run typecheck && npm run test:trigger && npm run test:worker && npm test",
     "verify:native": "npm run build && npm run build:worker && npm run test:wasm && npm run report",
     "verify": "npm run check && npm run verify:native",
     "check:package": "node scripts/package.mjs check",
-    "pack:release": "node scripts/package.mjs pack"
+    "pack:release": "node scripts/package.mjs pack",
+    "test:worker": "node --test test/worker.test.mjs"
   },
   "dependencies": {
     "@pulse-compute/provider-fastly": "1.0.0-beta.7",
@@ -68,6 +69,10 @@
     "dist/pulse-build.json",
     "dist/report.json",
     "dist/report.html",
-    "npm-shrinkwrap.json"
-  ]
+    "npm-shrinkwrap.json",
+    "templates/worker/*.ts"
+  ],
+  "bin": {
+    "fastly-tick": "scripts/worker.mjs"
+  }
 }

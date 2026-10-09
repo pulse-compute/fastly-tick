@@ -8,3 +8,4 @@ dist/
 .pulse-report-locks/
 deploy/*.local.json
 npm-shrinkwrap.json
+fixtures/worker/src/tick/

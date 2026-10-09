@@ -56,6 +56,11 @@ the worker token nor sends a request.
 the same dedicated worker credential via **`tick_worker_secrets`**, plus an
 independent KV resource link **`worker_state`**.
 
+It now consumes the [generated worker handler](worker.md), registering both the
+default `/__tick` endpoint and the scheduler's fixed `/__tick/run` path. The
+receipt function is an imported static source helper; auth, decoding and ACK
+handling come from the same templates installed in an external app.
+
 Its entire fixture work is durably recording an authenticated, validated `uptime`
 slot invocation under `fastly-tick-fixture/<runId>`. Its test-only receipts are not
 the scheduler’s bounded per-worker delivery records. It returns 202 only after a

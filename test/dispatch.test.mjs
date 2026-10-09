@@ -134,6 +134,17 @@ test('independent worker ACK follows durable receipt; repeat matches existing re
   assert.deepEqual(accepted.outboundRequests, [])
 })
 
+test('generated helper also serves the default /__tick endpoint with an exact ACK', () => {
+  const result = worker({ request: { method: 'POST', path: '/__tick', headers: {
+    authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
+    'x-tick-attempt': '1', 'content-type': 'application/json',
+  }, body: '{"worker":"uptime","scheduledForMs":60000}' } })
+  assert.equal(result.response.status, 202)
+  assert.equal(resultHeaders(result)['x-tick-invocation-id'], runId)
+  assert.equal(resultHeaders(result)['cache-control'], 'no-store')
+  assert.ok(result.state.get('worker_state', 'fastly-tick-fixture/' + runId))
+})
+
 test('independent worker rejects bad auth, protocol and payload without acceptance', () => {
   const base = { method: 'POST', path: '/__tick/run', headers: {
     authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
