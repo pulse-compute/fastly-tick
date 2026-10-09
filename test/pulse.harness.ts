@@ -4,6 +4,15 @@ const secrets = { TICK_PROBE_TOKEN: 'fixture-only-not-a-credential' }
 export default {
   cases: [
     {
+      name: 'healthcheck-tagged-probe',
+      request: { path: '/__tick/probe', headers: {
+        'x-tick-probe-token': secrets.TICK_PROBE_TOKEN,
+        'x-tick-probe-kind': 'healthcheck',
+      } },
+      secrets,
+      expect: { status: 200, text: 'healthy' },
+    },
+    {
       name: 'duplicate-token-rejected',
       request: { path: '/__tick/probe', headers: [
         ['x-tick-probe-token', secrets.TICK_PROBE_TOKEN],
