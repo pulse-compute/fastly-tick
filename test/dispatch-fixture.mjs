@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -18,7 +19,14 @@ export const runId = 'uptime:slot:60000'
 export const workerUrl = 'https://uptime.example.com/__tick/run'
 export const workerBinary = readFileSync(join(root, 'fixtures/worker/dist/bin/main.wasm'))
 
-export function enabledReceiver() {
+export function enabledReceiver({ shared = process.env.FASTLY_TICK_TEST_RECEIVER } = {}) {
+  // The suite runner owns this temporary build; standalone commands still build
+  // their own variant. Never silently fall back if shared bytes are missing/stale.
+  if (shared) {
+    const binary = readFileSync(shared)
+    assert.equal(createHash('sha256').update(binary).digest('hex'), process.env.FASTLY_TICK_TEST_RECEIVER_SHA256)
+    return { binary, wasmPath: shared, cleanup() {} }
+  }
   const directory = mkdtempSync(join(tmpdir(), 'fastly-tick-dispatch-'))
   try {
     for (const path of ['src', '.pulse/config.ts', 'test/pulse.harness.ts', 'package.json']) {

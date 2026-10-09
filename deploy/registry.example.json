@@ -1,0 +1,14 @@
+{
+  "schema": "fastly-tick.registry.v1",
+  "workers": [{
+    "id": "uptime",
+    "enabled": true,
+    "everyMs": 60000,
+    "backend": "uptime",
+    "path": "/__tick/run",
+    "method": "POST",
+    "authSecretRef": "UPTIME_TICK_TOKEN",
+    "ackTimeoutMs": 1000,
+    "maxAttempts": 3
+  }]
+}

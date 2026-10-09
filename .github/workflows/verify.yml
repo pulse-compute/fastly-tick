@@ -1,0 +1,46 @@
+name: Verify Native artifact
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Configuration, types and fast behavior
+        run: npm run check
+      - name: Native builds, provider fixtures and exact artifact reports
+        run: npm run verify:native
+      - name: Retain private build candidate for seven days
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fastly-tick-native-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/bin/main.wasm
+            dist/bin/main.wasm.sha256
+            dist/fastly.toml
+            dist/pulse-build.json
+            dist/report.json
+            dist/report.html
+            dist/artifact.json
+            package-lock.json
