@@ -9,7 +9,10 @@ cadence validation are explicitly deferred and do not block implementation.
 FT-02 adds [conditional KV sweep admission](docs/admission.md); trusted PoP
 filtering remains deferred, with all PoPs participating. Known Viceroy KV/CAS
 failures are documented and nonblocking; live KV smoke testing is deferred.
-Registry scheduling and worker delivery follow in FT-03–FT-06. The existing
+FT-03 adds [static dispatch and an independent worker fixture](docs/dispatch.md).
+Dispatch is disabled while the pinned Native provider lacks recoverable fetch
+errors and an enforced ACK timeout. Registry scheduling and redelivery follow
+in FT-04–FT-06. The existing
 `pulse-compute/tick` project is independent.
 
 The strict local Viceroy contention test has reproduced duplicate admitted
@@ -26,8 +29,8 @@ npm ci --ignore-scripts
 npm run verify
 ```
 
-This runs TypeScript validation, the focused provider fixture, the Native build,
-and JSON/HTML reports. `.pulse/config.ts` explicitly selects `host: 'fastly'`
+This runs TypeScript validation, focused provider/admission/dispatch fixtures,
+both Native builds, and receiver JSON/HTML reports. `.pulse/config.ts` explicitly selects `host: 'fastly'`
 and `target: 'native'`. There is no automatic JavaScript fallback.
 
 | Generated output | Purpose |
