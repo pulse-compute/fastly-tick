@@ -19,13 +19,13 @@ function healthy(result, admission) {
   assert.equal(result.headers['cache-control'], 'no-store')
   assert.equal(result.headers['x-tick-admission'], admission)
   if (admission !== 'admitted') assert.equal(result.headers['x-tick-next-sweep-at-ms'], undefined)
-  // FT-02 cannot read a registry, fetch a worker, delete, renew, or retry.
+  // Missing registry adds only a winner-side read; admission never sends work.
   assert.deepEqual(result.outboundRequests, [])
-  assert.ok(stages(result, 'lookup').length <= 1)
+  assert.ok(stages(result, 'lookup').length <= (admission === 'admitted' ? 2 : 1))
   assert.ok(stages(result, 'insert').length <= 1)
   for (const call of result.calls.filter(call => 'key' in call)) {
     assert.equal(call.store, store)
-    assert.equal(call.key, key)
+    assert.ok(call.key === key || (admission === 'admitted' && call.stage === 'lookup' && call.key === 'fastly-tick-v1/workers'))
   }
   return result
 }
@@ -83,7 +83,7 @@ test('emitted Wasm: all-PoP mode ignores untrusted location and kind headers', (
   ]) {
     const result = healthy(execute({ headers }), 'admitted')
     assert.equal(result.headers['x-tick-next-sweep-at-ms'], '115000')
-    assert.deepEqual(persisted(result.state), { version: 1, nextSweepAtMs: 115000 })
+    assert.deepEqual(persisted(result.state), { version: 1, nextSweepAtMs: 115000, nextWorkerIndex: 1 })
     assert.equal(stages(result, 'insert')[0].mode, 1)
   }
 })
@@ -110,6 +110,10 @@ test('emitted Wasm: invalid persisted schema and timestamps are not overwritten'
   for (const value of [
     null, false, 'sweep', [], {},
     { version: 2, nextSweepAtMs: 0 },
+    { version: 1, nextSweepAtMs: 0, nextWorkerIndex: -1 },
+    { version: 1, nextSweepAtMs: 0, nextWorkerIndex: 8 },
+    { version: 1, nextSweepAtMs: 0, nextWorkerIndex: 1.5 },
+    { version: 1, nextSweepAtMs: 0, nextWorkerIndex: '0' },
     { version: '1', nextSweepAtMs: 0 },
     { version: 1 },
     { version: 1, nextSweepAtMs: '0' },
@@ -152,7 +156,7 @@ test('emitted Wasm: shared authority admits exactly one stale create contender',
     assert.equal(writes[0].condition, undefined)
     assert.equal(writes[0].mask, 0) // No TTL or generation mask for absent insert.
   })
-  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 115000 })
+  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 115000, nextWorkerIndex: 1 })
 })
 
 test('emitted Wasm: shared authority admits exactly one stale CAS contender', () => {
@@ -161,7 +165,7 @@ test('emitted Wasm: shared authority admits exactly one stale CAS contender', ()
   const observation = state.get(store, key)
   const results = Array.from({ length: 8 }, () => execute({
     state,
-    fault: stage => stage === 'lookup' ? { observation } : undefined,
+    fault: (stage, detail) => stage === 'lookup' && detail.key === key ? { observation } : undefined,
   }))
   assert.equal(results.filter(result => result.headers['x-tick-admission'] === 'admitted').length, 1)
   results.forEach((result, index) => {
@@ -182,7 +186,7 @@ test('emitted Wasm: uncertain writes never admit even when the write committed',
   ]) {
     const result = healthy(execute({ fault }), 'unknown')
     assert.equal(stages(result, 'insert').length, 1)
-    assert.deepEqual(persisted(result.state), { version: 1, nextSweepAtMs: 115000 })
+    assert.deepEqual(persisted(result.state), { version: 1, nextSweepAtMs: 115000, nextWorkerIndex: 1 })
     healthy(execute({ state: result.state, nowMs: 100001 }), 'not-due')
   }
 })
@@ -198,7 +202,7 @@ test('emitted Wasm: elapsed KV budget fences prevent further work and late admis
   assert.equal(stages(slowRead, 'insert').length, 0)
   assert.equal(persisted(slowRead.state), undefined)
   const slowClaim = healthy(execute({ fault: stage => stage === 'insert' ? { readyDelayMs: 1500 } : undefined }), 'claimed-too-late')
-  assert.deepEqual(persisted(slowClaim.state), { version: 1, nextSweepAtMs: 115000 })
+  assert.deepEqual(persisted(slowClaim.state), { version: 1, nextSweepAtMs: 115000, nextWorkerIndex: 1 })
   const justWithin = healthy(execute({ fault: stage => stage === 'insert' ? { readyDelayMs: 1499 } : undefined }), 'admitted')
   assert.equal(justWithin.headers['x-tick-next-sweep-at-ms'], '115000')
   // These fixtures document the provider's 10s wait ceiling, not a claim that
@@ -229,10 +233,10 @@ test('emitted Wasm: crash after a claim preserves the slot until a later due hea
   assert.throws(() => execute({ state, fault: stage => {
     if (stage === 'insert_wait') throw new Error('fixture invocation terminated after commit')
   } }), /fixture invocation terminated after commit/)
-  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 115000 })
+  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 115000, nextWorkerIndex: 1 })
   healthy(execute({ state, nowMs: 114999 }), 'not-due')
   const next = healthy(execute({ state, nowMs: 115000 }), 'admitted')
   assert.equal(next.headers['x-tick-next-sweep-at-ms'], '130000')
-  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 130000 })
+  assert.deepEqual(persisted(state), { version: 1, nextSweepAtMs: 130000, nextWorkerIndex: 2 })
   assert.equal(stages(next, 'insert')[0].mask, 32)
 })

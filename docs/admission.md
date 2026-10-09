@@ -142,3 +142,7 @@ not a blocker for implementation or merge. The bounded healthy KV timeout remain
 a separate provider limitation to address before production relies on the current
 five-second health-check budget. Native log delivery and live heartbeat cadence
 remain deferred independently.
+
+FT-04 adds an optional bounded `nextWorkerIndex` to the version-one sweep value.
+Old values upgrade through their normal conditional claim. Registry scheduling
+begins only after confirmed admission; see [registry and slot policy](registry.md).

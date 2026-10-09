@@ -40,7 +40,7 @@ test('enabled Native dispatch uses one named backend and closed protocol headers
     authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
     'x-tick-attempt': '1', 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
   })
-  assert.deepEqual(JSON.parse(request.body.toString()), { worker: 'uptime', scheduledForMs: 0 })
+  assert.deepEqual(JSON.parse(request.body.toString()), { worker: 'uptime', scheduledForMs: 60000 })
   assert.ok(!JSON.stringify(result.logs).includes(workerToken))
 })
 
@@ -59,7 +59,8 @@ test('only exact 202 and matching ID ACK; response bodies are never inspected', 
   }
   const result = healthy(receiver(binary, { fixture: { status: 202,
     headers: { 'x-tick-invocation-id': runId }, body: Buffer.from([0xff, 0x00]), bodyDelayMs: 60000 } }), 'acked')
-  assert.ok(!result.trace.some(call => call.module === 'fastly_http_body' && call.name === 'read'))
+  const kvBodies = new Set(result.calls.filter(call => call.stage === 'body_read').map(call => call.handle))
+  assert.ok(result.trace.filter(call => call.module === 'fastly_http_body' && call.name === 'read').every(call => kvBodies.has(call.handle)), 'Only KV bodies may be read; never the ACK body')
 })
 
 test('auth, not-due, conflict and unknown claims cannot reach dispatch', () => {
@@ -102,7 +103,7 @@ test('late or unmeasurable ACK never accepted; no immediate retry', () => {
   let calls = 0
   const result = healthy(receiver(binary, { realtimeClock() {
     calls++
-    return calls === 5 ? { status: 1 } : { nanoseconds: 100000000000n }
+    return calls === 8 ? { status: 1 } : { nanoseconds: 100000000000n }
   } }), 'clock-unavailable')
   assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
 })
@@ -132,14 +133,14 @@ test('independent worker rejects bad auth, protocol and payload without acceptan
   const base = { method: 'POST', path: '/__tick/run', headers: {
     authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
     'x-tick-attempt': '1', 'content-type': 'application/json',
-  }, body: '{"worker":"uptime","scheduledForMs":0}' }
+  }, body: '{"worker":"uptime","scheduledForMs":60000}' }
   for (const [request, status] of [
     [{ ...base, headers: {} }, 401],
     [{ ...base, headers: { ...base.headers, authorization: 'Bearer wrong' } }, 401],
     [{ ...base, headers: { ...base.headers, 'x-tick-invocation-id': 'other' } }, 400],
     [{ ...base, headers: { ...base.headers, 'x-tick-attempt': '2' } }, 400],
     [{ ...base, body: 'not json' }, 400],
-    [{ ...base, body: '{"worker":"other","scheduledForMs":0}' }, 400],
+    [{ ...base, body: '{"worker":"other","scheduledForMs":60000}' }, 400],
   ]) {
     const result = worker({ request })
     assert.equal(result.response.status, status)

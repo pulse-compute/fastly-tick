@@ -7,12 +7,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execute, authority, token } from './admission-fixture.mjs'
 
+import { seed, registryKey, registry as document, entry } from './registry-fixture.mjs'
+
 const require = createRequire(import.meta.url)
 const root = fileURLToPath(new URL('..', import.meta.url))
 const provider = dirname(require.resolve('@pulse-compute/provider-fastly'))
 const { executeFastlyNativePlatformCapabilities } = require(join(provider, 'testing/native-platform-capabilities-host.js'))
 export const workerToken = 'fixture-worker-token-not-a-credential'
-export const runId = 'uptime:slot:0'
+export const runId = 'uptime:slot:60000'
 export const workerUrl = 'https://uptime.example.com/__tick/run'
 export const workerBinary = readFileSync(join(root, 'fixtures/worker/dist/bin/main.wasm'))
 
@@ -39,9 +41,10 @@ export function enabledReceiver() {
   }
 }
 
-export function receiver(binary, { workerSecret = workerToken, fixture, delayMs = 0, ...options } = {}) {
+export function receiver(binary, { workerSecret = workerToken, fixture, delayMs = 0, registry = document([entry()]), state = authority(), ...options } = {}) {
+  if (registry !== undefined) seed(state, registryKey, registry)
   const captured = []
-  const result = execute({ binary, secrets: { TICK_PROBE_TOKEN: token, UPTIME_TICK_TOKEN: workerSecret },
+  const result = execute({ binary, state, secrets: { TICK_PROBE_TOKEN: token, UPTIME_TICK_TOKEN: workerSecret },
     fixtures: { [workerUrl]: fixture ?? { status: 202, headers: { 'x-tick-invocation-id': runId }, body: 'ignored body' } },
     onOutboundRequest: request => captured.push(request),
     hostcallDelayMs: { 'fastly_http_req.pending_req_wait': delayMs },
@@ -57,7 +60,7 @@ export function worker({ state = authority(), request, fault } = {}) {
     request: request ?? { method: 'POST', path: '/__tick/run', headers: {
       authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
       'x-tick-attempt': '1', 'content-type': 'application/json',
-    }, body: '{"worker":"uptime","scheduledForMs":0}' },
+    }, body: '{"worker":"uptime","scheduledForMs":60000}' },
     secretStores: { tick_worker_secrets: { UPTIME_TICK_TOKEN: workerToken } },
     conditionalKv: { authority: state, onCall(stage, detail) { calls.push({ stage, ...detail }); return fault?.(stage, detail) } },
     logEndpointFailure: true,

@@ -7,7 +7,7 @@ KV/CAS discrepancies. Logging, live cadence, and deployed smoke remain deferred.
 
 ## Fixed descriptor
 
-An admitted sweep has one compiled POST call to
+An admitted sweep uses literal POST calls to
 `https://uptime.example.com/__tick/run`, bound to the preconfigured **`uptime`**
 backend. This hostname is a placeholder; replace it at the literal call site and
 in `.pulse/config.ts` before any deployment that enables dispatch. No dynamic
@@ -33,10 +33,10 @@ Content-Type: application/json
 {"worker":"uptime","scheduledForMs":0}
 ```
 
-This stable invocation is a transport example, not a production schedule. FT-04
-will provide due selection and slot IDs; FT-05 will persist pending delivery and
-bounded redelivery. The current path does not persist an ACK or retry a failed
-attempt. No incoming header can replace any protocol/auth header.
+This fixed invocation is the original FT-03 transport example.
+[FT-04](registry.md) now supplies bounded registry selection, stable UTC slot IDs,
+conditional first-attempt records and ACK settlement. FT-05 supplies bounded
+redelivery; the current path never retries within a sweep. No incoming header can replace any protocol/auth header.
 
 Only status **202** with `x-tick-invocation-id` exactly matching the request is
 an ACK. Generic 200, another status, absent/empty/mismatched ID, and an ACK arriving
@@ -56,8 +56,9 @@ the worker token nor sends a request.
 the same dedicated worker credential via **`tick_worker_secrets`**, plus an
 independent KV resource link **`worker_state`**.
 
-Its entire fixture work is durably recording the authenticated, validated fixed
-invocation under `fastly-tick-fixture/uptime:slot:0`. It returns 202 only after a
+Its entire fixture work is durably recording an authenticated, validated `uptime`
+slot invocation under `fastly-tick-fixture/<runId>`. Its test-only receipts are not
+the scheduler’s bounded per-worker delivery records. It returns 202 only after a
 confirmed insert, or after checking an existing matching receipt for a duplicate.
 Failed or uncertain persistence returns 503 without an ACK. Invalid auth/protocol
 or payload is rejected before persistence. A conflicting/corrupt receipt cannot
@@ -124,7 +125,7 @@ missing ACK ID, bounded header wait, and healthy transport recovery failed as
 described above. Strict assertions remain unchanged. No live Fastly service-to-
 service smoke or latency measurement was performed.
 
-`verify` passed: typecheck, 5 setup tests, 10 canonical fixtures, 13 admission
+At the initial FT-03 commit, `verify` passed: typecheck, 5 setup tests, 10 canonical fixtures, 13 admission
 tests, 11 dispatch/worker tests, both builds, and receiver report identity.
 The default receiver also passed all 11 Viceroy HTTP regressions. Receiver
 Wasm is 118,811 bytes; the independent fixture is 111,989 bytes. Generated

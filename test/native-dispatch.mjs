@@ -4,8 +4,10 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import fastly from '@pulse-compute/provider-fastly/testing/fastly-cli'
+import { registry, entry, registryKey } from './registry-fixture.mjs'
+import { encodeConditionalKvValue } from './admission-fixture.mjs'
 import { token } from './admission-fixture.mjs'
-import { enabledReceiver, workerToken, runId } from './dispatch-fixture.mjs'
+import { enabledReceiver, workerToken } from './dispatch-fixture.mjs'
 
 // Real loopback HTTP through Viceroy. The Node origin is only an adversarial
 // transport fixture; the final case uses a separate Native worker service.
@@ -20,12 +22,15 @@ const origin = createServer((request, response) => {
   const chunks = []
   request.on('data', chunk => chunks.push(chunk))
   request.on('end', () => {
+    // The provider's readiness helper probes backend GET /. This origin is an
+    // adversarial POST transport fixture; readiness is not a worker ACK.
+    if (request.method === 'GET' && request.url === '/') { response.end('ready'); return }
     captured = { method: request.method, path: request.url, headers: request.headers,
       body: Buffer.concat(chunks).toString() }
     if (mode === 'reset') { request.socket.destroy(); return }
     const status = mode === 'generic-200' ? 200 : mode === 'rejected' ? 503 : 202
-    const headers = mode === 'missing-id' ? {} : {
-      'x-tick-invocation-id': mode === 'wrong-id' ? 'other' : runId,
+    const headers = mode === 'missing-id' || !request.headers['x-tick-invocation-id'] ? {} : {
+      'x-tick-invocation-id': mode === 'wrong-id' ? 'other' : request.headers['x-tick-invocation-id'],
     }
     const later = (ms, action) => {
       const timer = setTimeout(() => { timers.delete(timer); action() }, ms)
@@ -65,7 +70,7 @@ async function probe(backendUrl, check) {
   const receiver = await server({ name: 'fastly-tick-dispatch-fixture', wasmFile: enabled.wasmPath,
     backends: { uptime: { url: backendUrl, overrideHost: 'uptime.example.com' } },
     secretStores: { tick_secrets: { TICK_PROBE_TOKEN: token, UPTIME_TICK_TOKEN: workerToken } },
-    kvStores: { tick_state: {} },
+    kvStores: { tick_state: { [registryKey]: Buffer.from(encodeConditionalKvValue(registry([entry()]))).toString('utf8') } },
   })
   try {
     const started = performance.now()
@@ -106,10 +111,13 @@ try {
       assert.equal(captured.method, 'POST')
       assert.equal(captured.path, '/__tick/run')
       assert.equal(captured.headers.authorization, 'Bearer ' + workerToken)
-      assert.equal(captured.headers['x-tick-invocation-id'], runId)
+      assert.match(captured.headers['x-tick-invocation-id'], /^uptime:slot:\d+$/)
       assert.equal(captured.headers['x-tick-attempt'], '1')
       assert.equal(captured.headers['x-tick-source'], 'fastly-tick')
-      assert.deepEqual(JSON.parse(captured.body), { worker: 'uptime', scheduledForMs: 0 })
+      const input = JSON.parse(captured.body)
+      assert.equal(input.worker, 'uptime')
+      assert.equal(input.scheduledForMs % 60000, 0)
+      assert.equal(captured.headers['x-tick-invocation-id'], 'uptime:slot:' + input.scheduledForMs)
       assert.ok(elapsedMs < 1000, 'ACK/body-free response must arrive before one second')
     }))
   }
