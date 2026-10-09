@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
@@ -39,8 +39,9 @@ try {
     dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
   }
 } catch { /* An exported checkout has no Git identity; do not invent one. */ }
+const lockPath = existsSync('package-lock.json') ? 'package-lock.json' : 'npm-shrinkwrap.json'
 const files = ['dist/bin/main.wasm', 'dist/bin/main.wasm.sha256', 'dist/fastly.toml',
-  'dist/pulse-build.json', 'dist/report.json', 'dist/report.html', 'package-lock.json'].map(path => {
+  'dist/pulse-build.json', 'dist/report.json', 'dist/report.html', lockPath].map(path => {
   const bytes = readFileSync(path)
   return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
 })

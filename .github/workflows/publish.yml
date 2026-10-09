@@ -1,0 +1,77 @@
+name: Publish npm application kit
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already committed in package.json
+        required: true
+        type: string
+      tag:
+        description: npm distribution tag
+        type: choice
+        options: [latest, beta, next]
+        default: latest
+      access:
+        description: npm visibility (public exposes the kit contents)
+        type: choice
+        options: [restricted, public]
+        default: restricted
+      auth:
+        description: Trusted publisher, or NPM_TOKEN for bootstrap
+        type: choice
+        options: [trusted, token]
+        default: trusted
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Require the reviewed main branch
+        env:
+          SELECTED_REF: ${{ github.ref }}
+        run: test "$SELECTED_REF" = refs/heads/main
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Check requested version before building
+        env:
+          PUBLISH_AUTH: ${{ inputs.auth }}
+          BOOTSTRAP_TOKEN: ${{ inputs.auth == 'token' && secrets.NPM_TOKEN || '' }}
+        run: |
+          if [ "$PUBLISH_AUTH" = token ] && [ -z "$BOOTSTRAP_TOKEN" ]; then
+            echo 'Configure NPM_TOKEN in the npm environment for token publishing.' >&2
+            exit 1
+          fi
+          npm run check:package
+      - run: npm ci --ignore-scripts
+      - name: Validate and build once
+        run: npm run verify
+      - name: Pack and validate the exact application kit
+        run: npm run pack:release
+      - name: Publish the validated tarball
+        env:
+          PUBLISH_TAG: ${{ inputs.tag }}
+          PUBLISH_ACCESS: ${{ inputs.access }}
+          NODE_AUTH_TOKEN: ${{ inputs.auth == 'token' && secrets.NPM_TOKEN || '' }}
+        run: |
+          npm publish "./dist/pulse-compute-fastly-tick-${EXPECTED_VERSION}.tgz" --ignore-scripts --tag "$PUBLISH_TAG" --access "$PUBLISH_ACCESS"
