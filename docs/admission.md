@@ -1,9 +1,11 @@
 # FT-02 — conditional sweep admission
 
 The receiver implements admission using Pulse `1.0.0-beta.7` Native KV. It does
-not read a worker registry or dispatch work yet. **Deployed conditional-write
-proof remains open before distributed dispatch may depend on this gate.**
-Logging and live heartbeat cadence are separately deferred by the owner.
+not read a worker registry or dispatch work yet. **Owner disposition, 2026-10-09:
+known Viceroy KV/CAS failures are documented and nonblocking. Live KV smoke
+testing is deferred; FT-02 completion and subsequent implementation may proceed.**
+This does not claim deployed arbitration is qualified. Logging and live heartbeat
+cadence are separately deferred by the owner.
 
 ## State and control flow
 
@@ -84,11 +86,11 @@ interrupt an already pending hostcall. A late read never starts a claim; a late
 confirmed write remains committed but does not admit work. Ordinary returned KV
 errors produce a healthy skip, possibly after the trigger has already timed out.
 Pulse needs a supported bounded KV deadline that returns an outcome before the
-health-check reserve is exhausted. Resolve and validate this before enabling
-dispatch under the current five-second health-check budget. No compiler/provider
+health-check reserve is exhausted. Resolve and validate this before production
+relies on the current five-second health-check budget. No compiler/provider
 or generated-Wasm patch is included here.
 
-## Proof and remaining gate
+## Validation and deferred live smoke
 
 ```sh
 npm run verify
@@ -102,15 +104,17 @@ generations, malformed data, failures before and after remote commit, elapsed
 fences, and crash recovery. Deterministic stale reads model competing snapshots;
 they do not prove Fastly's backend implementation. `test:native-admission` uses
 concurrent HTTP requests and fresh real Viceroy stores for create and CAS. It
-retains strict one-winner assertions and fails on duplicate winners.
+retains strict one-winner assertions and fails on duplicate winners. This local
+diagnostic is nonblocking under the owner's disposition; do not weaken its
+assertions or reinterpret its raw failures as passing semantics.
 
 Implementation run on 2026-10-09: `verify` passed (5 setup tests, 10 canonical
 fixtures, 13 injected-ABI admission tests); Viceroy 0.21.1 passed 11 HTTP cases.
 One strict 16-request Viceroy create burst **failed**: 2 admitted, 4 conflicts,
 10 not-due. Its CAS burst had 1 admitted, 3 conflicts, 12 not-due. A final replay
 after a source-comment edit produced one winner in each burst. All responses
-were healthy. The intermittent duplicate remains a failed local arbitration
-qualification; a passing replay cannot erase it or prove deployed behavior.
+were healthy. The intermittent duplicate remains a documented, nonblocking
+Viceroy discrepancy; a passing replay cannot erase it or prove deployed behavior.
 Keep the assertions intact; no timestamp-only substitute or retry workaround is
 valid. The final Native artifact is 109,164 bytes, SHA-256
 `311fe9e8de4a62940a4f8b49dba34f607a3a03165885996f05dd8cef35fba799`.
@@ -133,6 +137,8 @@ not a passing race. Any duplicate winner stops dependent dispatch work. Do not
 use a caller-supplied location tag as evidence of where a request executed.
 
 No deployed trial was run during FT-02 implementation: no Fastly credentials or
-receiver deployment were available. The missing live proof and bounded healthy
-KV timeout remain explicit correctness/operational gates. Native log delivery
-and live heartbeat cadence remain deferred, independently of these checks.
+receiver deployment were available. Live KV smoke testing is a deferred follow-up,
+not a blocker for implementation or merge. The bounded healthy KV timeout remains
+a separate provider limitation to address before production relies on the current
+five-second health-check budget. Native log delivery and live heartbeat cadence
+remain deferred independently.

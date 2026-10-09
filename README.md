@@ -7,8 +7,8 @@ The authoritative [v0.1 specification](docs/spec.md) defines the full scope.
 [trigger setup and observation instructions](docs/trigger.md). Logging and live
 cadence validation are explicitly deferred and do not block implementation.
 FT-02 adds [conditional KV sweep admission](docs/admission.md); trusted PoP
-filtering remains deferred, with all PoPs participating. Deployed KV contention
-proof remains a correctness gate before relying on distributed dispatch.
+filtering remains deferred, with all PoPs participating. Known Viceroy KV/CAS
+failures are documented and nonblocking; live KV smoke testing is deferred.
 Registry scheduling and worker delivery follow in FT-03–FT-06. The existing
 `pulse-compute/tick` project is independent.
 

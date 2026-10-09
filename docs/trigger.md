@@ -133,9 +133,9 @@ affect them. An empty sample has unknown gaps, not zero gaps. Preserve a concise
 summary plus deployment identities and delete raw observation logs afterward.
 
 The deferred operational checks do not prevent completing FT-01 or proceeding
-with FT-02. They remain unverified until recorded. Deployed conditional-write
-contention proof is a separate correctness gate before relying on distributed
-dispatch; see [FT-02 admission](admission.md).
+with FT-02. They remain unverified until recorded. Known Viceroy KV/CAS failures
+are also nonblocking, with live KV smoke testing deferred by the owner; see
+[FT-02 admission](admission.md).
 
 ## References checked for this implementation
 
