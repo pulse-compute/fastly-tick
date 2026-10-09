@@ -11,3 +11,6 @@ build = "npm run build"
 
 [local_server.secret_stores]
 tick_secrets = [{ key = "TICK_PROBE_TOKEN", data = "fixture-only-not-a-credential" }]
+
+[local_server.kv_stores]
+tick_state = []
