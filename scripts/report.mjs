@@ -29,4 +29,23 @@ assert.equal(artifact.bytes, wasm.length)
 writeFileSync('dist/report.json', json)
 execFileSync(process.execPath, [cli, 'report', '--html', '--out', 'dist/report.html'], { stdio: 'inherit' })
 writeFileSync('dist/bin/main.wasm.sha256', `${sha256}  main.wasm\n`)
+// Bounded delivery manifest for the exact successful build. Compiler/binding
+// provenance remains in pulse-build.json; this only ties distributed files to it.
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
+let source = { commit: null, dirty: null }
+try {
+  source = {
+    commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(),
+    dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
+  }
+} catch { /* An exported checkout has no Git identity; do not invent one. */ }
+const files = ['dist/bin/main.wasm', 'dist/bin/main.wasm.sha256', 'dist/fastly.toml',
+  'dist/pulse-build.json', 'dist/report.json', 'dist/report.html', 'package-lock.json'].map(path => {
+  const bytes = readFileSync(path)
+  return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+})
+writeFileSync('dist/artifact.json', JSON.stringify({ schema: 'fastly-tick.artifact.v1', source,
+  node: process.version, toolchain: { pulse: pkg.dependencies['@pulse-compute/pulse'],
+    provider: pkg.dependencies['@pulse-compute/provider-fastly'], cli: pkg.devDependencies['@pulse-compute/cli'] },
+  files }, null, 2) + '\n')
 console.log(JSON.stringify({ target: artifact.target, bytes: wasm.length, sha256, routes: report.routes.length, schemas: report.schemas.length }, null, 2))

@@ -20,11 +20,14 @@
     "test:native-admission": "node test/native-admission.mjs",
     "test:native-logs": "node test/native.mjs --require-logs",
     "test:trigger": "node --test test/trigger.test.mjs",
+    "test:wasm": "node scripts/test-wasm.mjs",
     "dev": "pulse dev",
     "build": "pulse build",
     "build:worker": "node scripts/build-worker.mjs",
     "report": "node scripts/report.mjs",
-    "verify": "npm run typecheck && npm run test:trigger && npm test && npm run build && npm run build:worker && npm run test:admission && npm run test:dispatch && npm run test:registry && npm run test:redelivery && npm run test:observability && npm run report"
+    "check": "npm run typecheck && npm run test:trigger && npm test",
+    "verify:native": "npm run build && npm run build:worker && npm run test:wasm && npm run report",
+    "verify": "npm run check && npm run verify:native"
   },
   "dependencies": {
     "@pulse-compute/provider-fastly": "1.0.0-beta.7",
