@@ -1,0 +1,159 @@
+import assert from 'node:assert/strict'
+import test, { after } from 'node:test'
+import { execute, authority, token } from './admission-fixture.mjs'
+import { enabledReceiver, receiver, worker, workerToken, runId, workerUrl } from './dispatch-fixture.mjs'
+
+const enabled = enabledReceiver()
+after(() => enabled.cleanup())
+const binary = enabled.binary
+const resultHeaders = result => Object.fromEntries(result.response.headers)
+function healthy(result, dispatch) {
+  assert.equal(result.response.status, 200)
+  assert.equal(result.response.body, 'healthy')
+  assert.equal(result.headers['cache-control'], 'no-store')
+  assert.equal(result.headers['x-tick-dispatch'], dispatch)
+  assert.ok(result.captured.length <= 1)
+  return result
+}
+
+test('shipped receiver keeps unqualified dispatch disabled', () => {
+  const result = execute()
+  assert.equal(result.headers['x-tick-dispatch'], 'disabled')
+  assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
+  assert.deepEqual(result.outboundRequests, [])
+  assert.ok(!result.trace.some(call => call.key === 'UPTIME_TICK_TOKEN'))
+})
+
+test('enabled Native dispatch uses one named backend and closed protocol headers', () => {
+  const result = healthy(receiver(binary, { headers: {
+    'x-tick-probe-token': token, authorization: 'caller override',
+    'x-tick-invocation-id': 'caller override', 'x-tick-attempt': '999',
+    'x-tick-source': 'caller override', 'x-tick-worker-url': 'https://evil.invalid/',
+  } }), 'acked')
+  assert.equal(result.headers['x-tick-ack-latency-ms'], '0')
+  assert.equal(result.captured.length, 1)
+  const request = result.captured[0]
+  assert.equal(request.backend, 'uptime')
+  assert.equal(request.url, workerUrl)
+  assert.equal(request.method, 'POST')
+  assert.deepEqual(Object.fromEntries(request.headers), {
+    authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
+    'x-tick-attempt': '1', 'x-tick-source': 'fastly-tick', 'content-type': 'application/json',
+  })
+  assert.deepEqual(JSON.parse(request.body.toString()), { worker: 'uptime', scheduledForMs: 0 })
+  assert.ok(!JSON.stringify(result.logs).includes(workerToken))
+})
+
+test('only exact 202 and matching ID ACK; response bodies are never inspected', () => {
+  for (const fixture of [
+    { status: 200, headers: { 'x-tick-invocation-id': runId } },
+    { status: 201, headers: { 'x-tick-invocation-id': runId } },
+    { status: 202 },
+    { status: 202, headers: { 'x-tick-invocation-id': '' } },
+    { status: 202, headers: { 'x-tick-invocation-id': 'uptime:slot:other' } },
+    { status: 202, headers: { 'x-tick-invocation-id': runId + ',other' } },
+    { status: 401 }, { status: 500 },
+  ]) {
+    const result = healthy(receiver(binary, { fixture: { ...fixture, body: runId } }), 'unacknowledged')
+    assert.equal(result.captured.length, 1)
+  }
+  const result = healthy(receiver(binary, { fixture: { status: 202,
+    headers: { 'x-tick-invocation-id': runId }, body: Buffer.from([0xff, 0x00]), bodyDelayMs: 60000 } }), 'acked')
+  assert.ok(!result.trace.some(call => call.module === 'fastly_http_body' && call.name === 'read'))
+})
+
+test('auth, not-due, conflict and unknown claims cannot reach dispatch', () => {
+  const rejected = receiver(binary, { headers: {} })
+  assert.equal(rejected.response.status, 401)
+  assert.deepEqual(rejected.captured, [])
+  for (const options of [
+    { state: authority({ version: 1, nextSweepAtMs: 100001 }) },
+    { fault: stage => stage === 'insert' ? { kvError: 4 } : undefined },
+    { fault: stage => stage === 'insert_wait' ? { status: 1 } : undefined },
+  ]) {
+    const result = receiver(binary, options)
+    assert.equal(result.response.body, 'healthy')
+    assert.deepEqual(result.captured, [])
+    assert.equal(result.headers['x-tick-dispatch'], undefined)
+  }
+})
+
+test('missing, short, excessive and injected worker secrets fail before fetch', () => {
+  for (const workerSecret of ['', 'short', 'x'.repeat(257), workerToken + '\r\nx: bad', workerToken + ' ', workerToken + '雪']) {
+    const result = healthy(receiver(binary, { workerSecret }), 'secret-unavailable')
+    assert.deepEqual(result.captured, [])
+    assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
+  }
+})
+
+test('elapsed preparation leaves ACK, overhead and response reserve before send', () => {
+  const result = healthy(receiver(binary, { secretDelayMs: 2500 }), 'budget-exhausted')
+  assert.deepEqual(result.captured, [])
+  assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
+})
+
+test('late or unmeasurable ACK never accepted; no immediate retry', () => {
+  for (const delayMs of [1000, 1500]) {
+    const result = healthy(receiver(binary, { delayMs }), 'late-ack')
+    assert.equal(result.headers['x-tick-ack-latency-ms'], '' + delayMs)
+    assert.equal(result.captured.length, 1)
+  }
+  healthy(receiver(binary, { delayMs: 999 }), 'acked')
+  let calls = 0
+  const result = healthy(receiver(binary, { realtimeClock() {
+    calls++
+    return calls === 5 ? { status: 1 } : { nanoseconds: 100000000000n }
+  } }), 'clock-unavailable')
+  assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
+})
+
+test('diagnostic: beta.7 transport failures are fatal, not healthy outcomes', () => {
+  for (const [fixture, stage] of [[{ sendStatus: 1 }, 77], [{ transportStatus: 1 }, 81]]) {
+    assert.throws(() => receiver(binary, { fixture }), error =>
+      error.detail?.lastError === 1006 && error.detail?.errorStage === stage)
+  }
+})
+
+test('independent worker ACK follows durable receipt; repeat matches existing receipt', () => {
+  const state = authority()
+  const accepted = worker({ state })
+  assert.equal(accepted.response.status, 202)
+  assert.equal(resultHeaders(accepted)['x-tick-invocation-id'], runId)
+  assert.equal(accepted.response.body, '')
+  assert.ok(accepted.calls.some(call => call.stage === 'insert'))
+  assert.ok(state.get('worker_state', 'fastly-tick-fixture/' + runId))
+  const repeated = worker({ state })
+  assert.equal(repeated.response.status, 202)
+  assert.ok(repeated.calls.some(call => call.stage === 'lookup'))
+  assert.deepEqual(accepted.outboundRequests, [])
+})
+
+test('independent worker rejects bad auth, protocol and payload without acceptance', () => {
+  const base = { method: 'POST', path: '/__tick/run', headers: {
+    authorization: 'Bearer ' + workerToken, 'x-tick-invocation-id': runId,
+    'x-tick-attempt': '1', 'content-type': 'application/json',
+  }, body: '{"worker":"uptime","scheduledForMs":0}' }
+  for (const [request, status] of [
+    [{ ...base, headers: {} }, 401],
+    [{ ...base, headers: { ...base.headers, authorization: 'Bearer wrong' } }, 401],
+    [{ ...base, headers: { ...base.headers, 'x-tick-invocation-id': 'other' } }, 400],
+    [{ ...base, headers: { ...base.headers, 'x-tick-attempt': '2' } }, 400],
+    [{ ...base, body: 'not json' }, 400],
+    [{ ...base, body: '{"worker":"other","scheduledForMs":0}' }, 400],
+  ]) {
+    const result = worker({ request })
+    assert.equal(result.response.status, status)
+    assert.ok(!result.calls.some(call => call.stage === 'insert'))
+  }
+})
+
+test('independent worker never ACKs failed or uncertain receipt persistence', () => {
+  for (const fault of [
+    stage => stage === 'body_new' ? { status: 1 } : undefined,
+    stage => stage === 'insert_wait' ? { status: 1 } : undefined,
+  ]) {
+    const result = worker({ fault })
+    assert.equal(result.response.status, 503)
+    assert.equal(resultHeaders(result)['x-tick-invocation-id'], undefined)
+  }
+})

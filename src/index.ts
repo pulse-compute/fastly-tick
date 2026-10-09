@@ -123,9 +123,77 @@ app.get('/__tick/probe', async (ctx) => {
   // Small authenticated HTTP observations make admission inspectable even while
   // Native log delivery is deferred. No generation, token, or raw KV payload is exposed.
   if (admission === 'admitted') {
+    // FT-03 fixed transport descriptor. Disabled until Native fetch can return
+    // recoverable errors and enforce an ACK deadline; registry/slots are FT-04.
+    const dispatchEnabled = false
+    const runId = 'uptime:slot:0'
+    const ackTimeoutMs = 1000
+    const requestWorkBudgetMs = 4000
+    let dispatch = 'disabled'
+    let ackLatencyMs = -1
+    if (dispatchEnabled) {
+      const workerToken = await ctx.secret.get('UPTIME_TICK_TOKEN')
+      let validToken = true
+      if (!workerToken || workerToken.length < 32 || workerToken.length > 256) {
+        validToken = false
+      } else {
+        // Secret values must fit one printable, whitespace-free HTTP header.
+        for (let i = 0; i < 256 && i < workerToken.length; i++) {
+          if (workerToken[i] <= ' ' || workerToken[i] > '~') validToken = false
+        }
+      }
+      if (!validToken) {
+        dispatch = 'secret-unavailable'
+      } else {
+        const beforeSend = await ctx.time.now()
+        if (beforeSend.status !== 'ok') {
+          dispatch = 'clock-unavailable'
+        } else if (beforeSend.unixEpochMs < clock.unixEpochMs ||
+                   beforeSend.unixEpochMs - clock.unixEpochMs >= requestWorkBudgetMs - ackTimeoutMs - 500) {
+          dispatch = 'budget-exhausted'
+        } else {
+          // Literal destination + named backend, closed protocol headers, and a
+          // dedicated Secret Store credential. No caller/registry URL or headers.
+          const response = await ctx.fetch('https://uptime.example.com/__tick/run', {
+            method: 'POST', timeoutMs: 1000,
+            headers: {
+              authorization: 'Bearer ' + workerToken,
+              'x-tick-invocation-id': runId,
+              'x-tick-attempt': '1',
+              'x-tick-source': 'fastly-tick',
+              'content-type': 'application/json',
+            },
+            body: '{"worker":"uptime","scheduledForMs":0}',
+          })
+          const afterAck = await ctx.time.now()
+          if (afterAck.status !== 'ok' || afterAck.unixEpochMs < beforeSend.unixEpochMs) {
+            dispatch = 'clock-unavailable'
+          } else {
+            ackLatencyMs = afterAck.unixEpochMs - beforeSend.unixEpochMs
+            if (ackLatencyMs >= ackTimeoutMs) {
+              dispatch = 'late-ack'
+            } else if (response.status === 202 && response.header('x-tick-invocation-id') === runId) {
+              dispatch = 'acked'
+            } else {
+              dispatch = 'unacknowledged'
+            }
+          }
+          // Never read the response body, poll completion, or retry immediately.
+          // Native timeoutMs/transport recovery qualification is in docs/dispatch.md.
+        }
+      }
+    }
+    if (ackLatencyMs >= 0) {
+      return ctx.text('healthy', { headers: {
+        'cache-control': 'no-store', 'x-tick-admission': admission,
+        'x-tick-next-sweep-at-ms': '' + nextSweepAtMs,
+        'x-tick-dispatch': dispatch, 'x-tick-ack-latency-ms': '' + ackLatencyMs,
+      } })
+    }
     return ctx.text('healthy', { headers: {
       'cache-control': 'no-store', 'x-tick-admission': admission,
       'x-tick-next-sweep-at-ms': '' + nextSweepAtMs,
+      'x-tick-dispatch': dispatch,
     } })
   }
   return ctx.text('healthy', {

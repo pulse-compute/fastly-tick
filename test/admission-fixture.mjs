@@ -23,14 +23,15 @@ export function authority(value, generation = 1n) {
   return result
 }
 
-export function execute({ state = authority(), nowMs = 100000, headers, fault, binary = wasm, ...options } = {}) {
+export function execute({ state = authority(), nowMs = 100000, headers, fault, binary = wasm,
+  secrets = { TICK_PROBE_TOKEN: token }, ...options } = {}) {
   const calls = []
   const result = executeFastlyNativePlatformCapabilities(binary, {
     clockUnixSeconds: nowMs / 1000,
     logEndpointFailure: true, // Admission never depends on the deferred log sink.
     ...options,
     request: { path: '/__tick/probe', headers: headers ?? { 'x-tick-probe-token': token } },
-    secretStores: { tick_secrets: { TICK_PROBE_TOKEN: token } },
+    secretStores: { tick_secrets: secrets },
     conditionalKv: {
       authority: state,
       onCall(stage, detail) {

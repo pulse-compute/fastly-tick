@@ -1,0 +1,5 @@
+{
+  "name": "fastly-tick-worker-fixture",
+  "private": true,
+  "type": "module"
+}

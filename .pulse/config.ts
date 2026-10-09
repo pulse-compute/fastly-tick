@@ -13,10 +13,12 @@ export default defineConfig((scope) => ({
     target: 'native',
     outDir: 'dist',
     probeToken: scope.secret('TICK_PROBE_TOKEN'),
+    workerToken: scope.secret('UPTIME_TICK_TOKEN'),
     fastly: {
       bindings: {
         secretStore: 'tick_secrets',
         kv: { tick: 'tick_state' },
+        backends: { 'https://uptime.example.com': 'uptime' },
         dynamicBackends: false,
       },
       build: { name: 'fastly-tick' },
