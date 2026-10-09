@@ -16,6 +16,8 @@ with one conditional delivery record per worker and a rotating two-worker cap.
 FT-05 adds [bounded redelivery and crash recovery](docs/redelivery.md), preserving
 run IDs across attempts and stopping at ACK or exhaustion. The existing
 `pulse-compute/tick` project is independent.
+FT-06 adds [protected current status and bounded operational observations](docs/operations.md).
+Integrated live proof and Native logging remain explicitly deferred.
 
 The strict local Viceroy contention test has reproduced duplicate admitted
 requests. The provider also cannot yet enforce a healthy KV timeout inside the
@@ -31,7 +33,7 @@ npm ci --ignore-scripts
 npm run verify
 ```
 
-This runs TypeScript validation, focused provider/admission/dispatch/registry/redelivery fixtures,
+This runs TypeScript validation, focused provider/admission/dispatch/registry/redelivery/operations fixtures,
 both Native builds, and receiver JSON/HTML reports. `.pulse/config.ts` explicitly selects `host: 'fastly'`
 and `target: 'native'`. There is no automatic JavaScript fallback.
 
@@ -68,6 +70,10 @@ also expose `x-tick-next-sweep-at-ms`. The static defaults are a 15-second sweep
 resolution and a 1,500 ms KV budget fence. The fence prevents starting more work
 after the budget expires; it cannot interrupt an in-flight provider KV wait.
 See [admission behavior and validation limits](docs/admission.md).
+
+`GET /__tick/status` uses the same authentication and never triggers work. An
+optional `x-tick-worker-id` selects one persisted worker record. It returns a
+small, read-only JSON snapshot; see [operational semantics and qualification](docs/operations.md).
 
 ## Execute the emitted Wasm locally
 

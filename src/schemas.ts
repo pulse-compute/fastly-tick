@@ -14,6 +14,23 @@ export interface Delivery {
   status: string; attempts: number; nextAttemptAtMs: number; inFlightUntilMs: number
   droppedScheduledForMs?: number
 }
+export interface Observation {
+  event: string; receiver: string; kind: string; atMs: number; popMode: string
+  receiverPop: string; admission: string; registry: string
+  considered: number; selected: number; sends: number; acks: number
+  ackTimeouts: number; invalidAcks: number; redeliveries: number
+  exhausted: number; dropped: number; ackLatencyOneMs: number; ackLatencyTwoMs: number
+  dispatchLatenessMs: number; responseElapsedMs: number
+}
+export interface Status {
+  schema: string; observedAtMs: number; scope: string; dispatch: string; popMode: string
+  receiverPop: string; logging: string; liveGate: string; resolutionMs: number
+  kvBudgetMs: number; requestWorkBudgetMs: number; responseReserveMs: number
+  healthcheckTimeoutMs: number; ackTimeoutCapMs: number; maxSends: number
+  sweepRead: string; nextSweepAtMs: number; workerId: string; deliveryRead: string
+  deliveryStatus: string; scheduledForMs: number; attempts: number
+  nextAttemptAtMs: number; inFlightUntilMs: number; droppedScheduledForMs: number
+}
 
 export default defineSchemaRegistry({
   schemas: {
@@ -23,5 +40,7 @@ export default defineSchemaRegistry({
       maxArrayItems: 8, maxObjectMembers: 12, maxStringLength: 64, maxKeyLength: 32,
     } }),
     'tick.Delivery': schema<Delivery>(),
+    'tick.Observation': schema<Observation>(),
+    'tick.Status': schema<Status>(),
   },
 })
