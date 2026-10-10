@@ -47,12 +47,16 @@ if (mode === 'check') {
     for (const path of ['package.json', 'npm-shrinkwrap.json', 'README.md', '.pulse/config.ts', 'src/index.ts', 'src/schemas.ts',
       'tsconfig.json', 'fastly.toml', 'scripts/report.mjs', 'test/pulse.harness.ts',
       'fixtures/worker/package.json', 'fixtures/worker/.pulse/config.ts', 'fixtures/worker/src/index.ts',
-      'deploy/trigger.example.json', 'deploy/registry.example.json', 'dist/bin/main.wasm',
+      'deploy/trigger.example.json', 'deploy/registry.example.json', 'docs/terraform.md',
+      'deploy/terraform/versions.tf', 'deploy/terraform/variables.tf', 'deploy/terraform/main.tf',
+      'deploy/terraform/outputs.tf', 'deploy/terraform/.terraform.lock.hcl',
+      'deploy/terraform/terraform.tfvars.example', 'deploy/terraform/tests/setup.tftest.hcl', 'dist/bin/main.wasm',
       'dist/bin/main.wasm.sha256', 'dist/fastly.toml', 'dist/pulse-build.json', 'dist/report.json', 'dist/report.html']) {
       assert.ok(files.has(path), `Missing kit file: ${path}`)
     }
     for (const path of files) {
       assert.ok(!/(^|\/)(node_modules|\.github|\.git|\.env[^/]*|\.pulse-report-locks)(\/|$)|\.local\.json$|\.tgz$/.test(path), `Unexpected private/generated file: ${path}`)
+      assert.ok(!/(^|\/)\.terraform(\/|$)|\.tfstate(?:\..*)?$|\.tfvars(?:\.json)?$|\.tfplan$|(^|\/)crash[^/]*\.log$/.test(path), `Unexpected Terraform state/configuration: ${path}`)
       assert.ok(!path.startsWith('fixtures/worker/dist/'), 'Worker test builds are not published')
       assert.ok(!path.startsWith('.pulse/') || path === '.pulse/config.ts', 'Pulse caches/reports are not published')
       assert.ok(!path.startsWith('dist/') || ['dist/bin/main.wasm', 'dist/bin/main.wasm.sha256',
