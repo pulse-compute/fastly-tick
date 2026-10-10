@@ -8,3 +8,10 @@ dist/
 .pulse-report-locks/
 deploy/*.local.json
 npm-shrinkwrap.json
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/*.tfvars
+deploy/terraform/*.tfvars.json
+deploy/terraform/*.tfplan
+deploy/terraform/crash*.log

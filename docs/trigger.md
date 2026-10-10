@@ -7,6 +7,11 @@ unverified. No Fastly account credentials were available during implementation.
 
 ## Receiver and dedicated trigger
 
+The [Terraform setup](terraform.md) is an alternative that creates both services
+and stores, uploads the reviewed receiver package and supports explicit staged
+activation. When Terraform owns the services, follow that workflow rather than
+the manual deployment and trigger-script steps below.
+
 1. Build the receiver with `npm ci --ignore-scripts && npm run verify`.
    Deploy the reviewed `dist/` candidate to a Compute service using the Fastly
    deployment workflow. Attach the Secret Store using resource-link name

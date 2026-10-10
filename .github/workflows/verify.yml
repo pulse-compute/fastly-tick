@@ -13,6 +13,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  terraform:
+    name: terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.13.5
+          terraform_wrapper: false
+      - run: terraform -chdir=deploy/terraform fmt -check -recursive
+      - run: terraform -chdir=deploy/terraform init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=deploy/terraform validate -no-color
+      - run: terraform -chdir=deploy/terraform test -no-color
+
   verify:
     name: verify
     runs-on: ubuntu-latest

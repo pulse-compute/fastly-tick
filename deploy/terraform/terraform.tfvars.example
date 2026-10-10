@@ -1,0 +1,14 @@
+name_prefix   = "fastly-tick"
+receiver_host = "tick.example.com"
+trigger_host  = "trigger.example.com"
+worker_host   = "uptime.example.com"
+
+# Set TF_VAR_tick_probe_token from your secret manager/environment.
+# Never put tokens in this file.
+
+# Optional reviewed package upload (prefer an absolute path).
+# receiver_package = "/absolute/path/fastly-tick/dist/pkg/fastly-tick.tar.gz"
+
+# Activate the receiver first, smoke it, then activate the trigger in a later plan.
+activate_receiver = false
+activate_trigger  = false

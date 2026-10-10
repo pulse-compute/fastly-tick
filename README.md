@@ -85,7 +85,8 @@ same restrictions as the source checkout.
 
 PR/main CI exposes the stable **`verify`** check, including metadata/lock agreement,
 Native fixtures/report identity and actual tarball contents/Wasm checks. Require
-`verify` in the main branch rule to enforce the merge gate. Repository rules are
+`verify` and the independent **`terraform`** check in the main branch rule to
+enforce the merge gates. Repository rules are
 an administrator setting, separate from the workflow file.
 
 To publish, merge the version/name/lock changes first, then run **Publish npm
@@ -108,6 +109,12 @@ eligible trusted publishes generate it automatically once the repo is public.
 No publication or repository visibility change occurs when this PR is merged.
 
 ## Receiver and worker setup
+
+For infrastructure as code, use the [Terraform setup](docs/terraform.md). It
+provisions the receiver, stores and dedicated VCL trigger as inactive drafts,
+with explicit package upload and staged activation instructions. Secret values
+and registry contents remain operator-managed. Choose Terraform or the manual
+deployment/trigger workflow below as the service owner.
 
 For eventual deployment, install the [Fastly CLI](https://www.fastly.com/documentation/reference/tools/cli/)
 and use an account with Compute, KV and Secret Store access. Create a Compute
