@@ -31,7 +31,8 @@
     "verify:native": "npm run build && npm run build:worker && npm run test:wasm && npm run report",
     "verify": "npm run check && npm run verify:native",
     "check:package": "node scripts/package.mjs check",
-    "pack:release": "node scripts/package.mjs pack"
+    "pack:release": "node scripts/package.mjs pack",
+    "test:combined-acceptance": "node scripts/combined-acceptance.mjs"
   },
   "dependencies": {
     "@pulse-compute/provider-fastly": "1.0.0-beta.7",

@@ -274,3 +274,12 @@ below. Implementation completion does not close the deferred
 
 Keep the repository private. Public launch, showcase and broader report comparison
 are separate future work.
+
+## Integrated candidate acceptance
+
+Step 6 combines the Fastly provider fixes with the strict application dispatch
+fixture using local Pulse package tarballs. Run `npm run test:combined-acceptance
+-- --packages /absolute/path/pulse-release-manifest.json --out /fresh/results`
+with `PULSE_VICEROY_BIN` set. See [combined acceptance](docs/dispatch.md#combined-acceptance-for-the-integrated-provider-fixes)
+for prerequisites, evidence, and remaining live gates. This opt-in application
+check does not publish Pulse or enable shipping dispatch.

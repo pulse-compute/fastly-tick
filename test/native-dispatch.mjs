@@ -13,6 +13,7 @@ import { enabledReceiver, workerToken } from './dispatch-fixture.mjs'
 // transport fixture; the final case uses a separate Native worker service.
 const enabled = enabledReceiver()
 const header = (response, name) => response.headers.find(([key]) => key.toLowerCase() === name)?.[1]
+const cases = []
 let passed = 0
 let total = 0
 let mode = 'valid'
@@ -88,8 +89,8 @@ async function probe(backendUrl, check) {
 
 async function trial(name, work) {
   total++
-  try { await work(); passed++; console.log(`ok - native ${name}`) }
-  catch (error) { process.exitCode = 1; console.error(`not ok - native ${name}: ${error.message}`) }
+  try { await work(); passed++; cases.push({ name, status: 'passed' }); console.log(`ok - native ${name}`) }
+  catch (error) { cases.push({ name, status: 'failed' }); process.exitCode = 1; console.error(`not ok - native ${name}: ${error.message}`) }
 }
 
 function healthy(response, outcome) {
@@ -130,18 +131,27 @@ try {
   await trial(mode, () => probe(worker.baseUrl, response => healthy(response, 'acked')))
 
   if (process.argv.includes('--qualify')) {
+    await trial('missing worker auth', async () => {
+      const response = await fastly.requestFastlyCompute(worker, { method: 'POST', path: '/__tick/run',
+        headers: { 'x-tick-invocation-id': 'uptime:slot:60000', 'x-tick-attempt': '1', 'content-type': 'application/json' },
+        body: '{"worker":"uptime","scheduledForMs":60000}' })
+      assert.equal(response.status, 401)
+      assert.equal(header(response, 'x-tick-invocation-id'), undefined)
+    })
     mode = 'slow-headers'
     await trial('strict ACK deadline', () => probe(originUrl, (response, elapsedMs) => {
       assert.equal(response.status, 200)
       assert.equal(response.body.toString(), 'healthy')
-      assert.notEqual(header(response, 'x-tick-dispatch'), 'acked')
+      healthy(response, 'unacknowledged')
+      assert.equal(header(response, 'x-tick-dispatch-error'), mode === 'reset' ? 'transport' : 'timeout')
       assert.ok(elapsedMs <= 1250, `One-second ACK wait exceeded: ${Math.round(elapsedMs)}ms`)
     }))
     mode = 'reset'
     await trial('strict healthy transport failure', () => probe(originUrl, response => {
       assert.equal(response.status, 200)
       assert.equal(response.body.toString(), 'healthy', 'Transport failure must remain an explicit healthy skip')
-      assert.notEqual(header(response, 'x-tick-dispatch'), 'acked')
+      healthy(response, 'unacknowledged')
+      assert.equal(header(response, 'x-tick-dispatch-error'), mode === 'reset' ? 'transport' : 'timeout')
     }))
   }
 } finally {
@@ -152,3 +162,6 @@ try {
   enabled.cleanup()
 }
 console.log(`${passed}/${total} local Native dispatch HTTP checks passed; live Fastly smoke remains deferred`)
+
+if (process.env.FASTLY_TICK_NATIVE_DISPATCH_REPORT) await writeFile(process.env.FASTLY_TICK_NATIVE_DISPATCH_REPORT,
+  JSON.stringify({ status: passed === total ? 'passed' : 'failed', evidence: 'Viceroy-loopback-HTTP', cases }, null, 2) + '\n')

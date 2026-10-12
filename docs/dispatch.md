@@ -68,7 +68,7 @@ This fixture does not start work after returning or pretend a background promise
 survives Compute request termination. Real workers must take responsibility for
 their actual work before ACKing.
 
-## Native capability blockers
+## Published beta.7 capability blockers
 
 | Required behavior | Reproduced beta.7 behavior |
 | --- | --- |
@@ -76,7 +76,7 @@ their actual work before ACKing.
 | Return healthy after transport failure | Send/wait failures are fatal transport errors; a reset returned an empty 200 instead of `healthy` |
 | Return healthy for 202 without matching ID | Missing response-header lookup produced an empty 200 in Viceroy, while the injected host returned the intended healthy unacknowledged outcome |
 
-Installed `provider-fastly/src/build/native-platform-capabilities.js` parses
+The published beta.7 `provider-fastly/src/build/native-platform-capabilities.js` parses
 method, headers, body/JSON, and backend for fetch, then directly calls
 `pending_req_wait`; it never uses `init.timeoutMs`. Nonzero send/wait status
 sets transport error 1006 at stage 77/81. `native-application-errors.js` does not
@@ -131,6 +131,47 @@ The default receiver also passed all 11 Viceroy HTTP regressions. Receiver
 Wasm is 118,811 bytes; the independent fixture is 111,989 bytes. Generated
 reports and artifacts remain ignored and reproducible.
 
-After the provider gaps are fixed, rerun the strict diagnostic, configure the
-actual backend/secret, replace the fixed invocation with FT-04 scheduling, and
-perform the deferred live smoke before claiming deployed behavior.
+## Combined acceptance for the integrated provider fixes
+
+The opt-in gate tests the integrated Pulse candidate for #246/#252 (missing
+headers), #251 (transport recovery), #250 (fetch deadlines), and #254 (safe
+structured logging). Published dependency pins stay at beta.7 until release.
+
+```sh
+PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:combined-acceptance -- \
+  --packages /absolute/path/to/packed/pulse-release-manifest.json \
+  --out /absolute/path/to/fresh/combined-results
+```
+
+First build and pack the integrated Pulse checkout with its normal pack command.
+The application command requires Node 24 (or another supported Node with native
+TypeScript test loading), npm, tar, and an explicit Viceroy binary. It copies the
+application inputs to a temporary consumer, installs every local manifest
+tarball with lifecycle scripts disabled, and compares installed Pulse files to
+their packed bytes before and after execution. npm's `.gitignore` to `.npmignore`
+extraction rename is recorded; no package content is patched. The enabled
+receiver is an isolated source variant, compiled with those same packages.
+
+The gate runs actual Native injected-ABI cases, all 14 receiver HTTP cases,
+and strict Viceroy dispatch HTTP cases including unauthenticated worker input.
+Missing auth must reject before persistence. Missing ACK ID must remain healthy
+and unacknowledged. Reset and delayed headers must return healthy without
+settlement or an immediate retry. Valid, timely 202 plus matching ID must ACK
+without consuming the response body. Injected ABI cases also cover the exact
+1,000ms boundary, retained pending leases, and parsing emitted structured log
+bytes with all required counter keys intact.
+
+The receiver handles only `PULSE_FETCH_NETWORK` and `PULSE_FETCH_TIMEOUT` during
+the dispatch phase. It returns `x-tick-dispatch: unacknowledged` and
+`x-tick-dispatch-error: transport|timeout`, leaving the existing delivery lease
+pending because the worker may have received the attempt. The aborted sweep has
+no complete counter observation: absent counters remain unknown, never zero.
+Other errors retain their existing handling.
+
+Each run requires a fresh output directory and retains terminal status, step
+logs, case results, application input hashes, package hashes, Viceroy identity,
+and the three emitted Wasm hashes. Failed attempts must be kept separately.
+This is combined development acceptance, not a Pulse release seal or deployed
+Fastly qualification. Live KV/CAS behavior, stdout log delivery, cadence, and
+service-to-service smoke remain separate gates. Configure the actual backend
+and secret and complete those gates before enabling shipping dispatch.
