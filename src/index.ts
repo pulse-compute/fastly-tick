@@ -333,6 +333,7 @@ app.get('/__tick/probe', async (ctx) => {
                                  beforeSend.unixEpochMs + item.ackTimeoutMs > candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
                         else {
                           // Only the compiled destination and reserved headers have authority.
+                          ctx.state.set('tickPhase', 'dispatch')
                           const response = await ctx.fetch('https://uptime.example.com/__tick/run', {
                             method: 'POST', timeoutMs: item.ackTimeoutMs,
                             headers: {
@@ -341,6 +342,7 @@ app.get('/__tick/probe', async (ctx) => {
                             },
                             body: '{"worker":"' + item.id + '","scheduledForMs":' + scheduledForMs + '}',
                           })
+                          ctx.state.set('tickPhase', 'delivery')
                           sends++
                           const lateness = beforeSend.unixEpochMs - scheduledForMs
                           if (lateness > dispatchLatenessMs) dispatchLatenessMs = lateness
@@ -493,6 +495,7 @@ app.get('/__tick/probe', async (ctx) => {
                                  beforeSend.unixEpochMs + item.ackTimeoutMs > candidateDelivery.inFlightUntilMs) dispatch = 'budget-exhausted'
                         else {
                           // Only the compiled destination and reserved headers have authority.
+                          ctx.state.set('tickPhase', 'dispatch')
                           const response = await ctx.fetch('https://uptime.example.com/__tick/run', {
                             method: 'POST', timeoutMs: item.ackTimeoutMs,
                             headers: {
@@ -501,6 +504,7 @@ app.get('/__tick/probe', async (ctx) => {
                             },
                             body: '{"worker":"' + item.id + '","scheduledForMs":' + scheduledForMs + '}',
                           })
+                          ctx.state.set('tickPhase', 'delivery')
                           sends++
                           const lateness = beforeSend.unixEpochMs - scheduledForMs
                           if (lateness > dispatchLatenessMs) dispatchLatenessMs = lateness
@@ -707,6 +711,17 @@ app.get('/__tick/status', async (ctx) => {
 })
 
 app.error(async (error, ctx, next) => {
+  const code = (error as { code?: string }).code
+  if (ctx.state.get('tickPhase') === 'dispatch' &&
+      (code === 'PULSE_FETCH_NETWORK' || code === 'PULSE_FETCH_TIMEOUT')) {
+    // The attempt may have reached the worker. Leave its pending lease intact;
+    // never ACK, settle, or retry after an uncertain transport/header outcome.
+    return ctx.text('healthy', { headers: {
+      'cache-control': 'no-store', 'x-tick-admission': 'admitted',
+      'x-tick-dispatch': 'unacknowledged',
+      'x-tick-dispatch-error': code === 'PULSE_FETCH_TIMEOUT' ? 'timeout' : 'transport',
+    } })
+  }
   if ((error as { code?: string }).code === 'PULSE_SCHEMA_ENCODE') {
     const phase = ctx.state.get('tickPhase')
     if (phase === 'status-sweep' || phase === 'status-delivery') {
