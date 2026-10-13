@@ -1,8 +1,8 @@
 # FT-05 — bounded redelivery and crash recovery
 
 FT-05 completes the delivery transitions on top of the [registry and slot
-contract](registry.md). Dispatch remains compiled off while the pinned Pulse
-beta.7 timeout, transport recovery and missing-header gaps are unresolved.
+contract](registry.md). Dispatch remains compiled off pending deployed
+qualification with the pinned Pulse beta.8 packages.
 The default app can prepare records but does not consume retry attempts or
 resolve worker credentials. The enabled test variant executes the real emitted
 Wasm; no production gate or provider code is patched.
@@ -27,8 +27,8 @@ The pre-send fence requires enough time for the entire ACK budget within both
 the attempt's in-flight deadline and the request work budget. Slow claims,
 missing credentials or process termination can consume an attempt without a
 send; that is deliberate conservative accounting. Elapsed fences cannot cancel
-the provider's ignored fetch timeout or fixed KV wait. Dispatch must remain off
-until the provider qualification passes; live smoke remains deferred.
+the provider's fixed KV wait. Beta.8 enforces the fetch deadline and exposes
+recoverable errors; live smoke remains deferred.
 
 ## Outcomes and recovery
 
@@ -36,7 +36,7 @@ until the provider qualification passes; live smoke remains deferred.
 | --- | --- |
 | Exact timely 202 with matching ID | CAS to `acked`; stop delivering that invocation |
 | Rejection, wrong/missing ACK, or late response | CAS to `pending`, or `exhausted` after the last allowed attempt |
-| Crash before or after send / fatal transport failure | Claimed pending record survives; another heartbeat may retry after both deadlines |
+| Crash before/after send or recoverable transport failure | Claimed pending record survives; another heartbeat may retry after both deadlines |
 | Last attempt crashes | After its in-flight deadline, a later heartbeat conditionally marks it exhausted without sending |
 | Unknown result-write outcome | The next versioned read determines whether ACK/exhaustion committed; no guessed success |
 | Newer slot while old record remains pending | After its in-flight deadline, conditionally replace it with the current slot; do not backfill |
@@ -69,14 +69,14 @@ aligned timestamp. Exhausted and expired windows do not block newer slots.
 `npm run test:redelivery` executes the receiver and independent worker Wasm
 against injected Fastly ABIs and a shared conditional KV authority. The lost-ACK
 case has the worker persist acceptance, then injects a transport failure before
-Tick receives the ACK. Beta.7 terminates that invocation through its known fatal
-error path; the next heartbeat still recovers the pending record and sends the
+Tick receives the ACK. Beta.8 returns a healthy unacknowledged response with a
+transport error marker; the next heartbeat recovers the pending record and sends the
 same ID with attempt two. The worker ACKs the duplicate receipt, Tick records
 `acked`, and a later heartbeat sends nothing for that slot.
 
-This proves bounded delivery-state recovery. It does **not** prove healthy
-transport-error handling, live KV arbitration, or a deployed lost-ACK gate.
-The strict FT-03 HTTP diagnostic still exposes the three upstream gaps. Known
+This proves bounded delivery-state and healthy transport-error recovery through
+injected Native ABIs. It does not prove live KV arbitration or a deployed lost-ACK
+gate; strict HTTP qualification remains separate. Known
 Viceroy KV/CAS discrepancies remain documented and nonblocking; logging and live
 cadence retain their existing deferrals.
 

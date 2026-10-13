@@ -5,8 +5,8 @@ import { enabledReceiver, receiver, worker, workerToken, runId } from './dispatc
 import { delivery, deliveryKey } from './registry-fixture.mjs'
 import { fromHeaders, parseEvent } from '../scripts/observe.mjs'
 
-// Opt-in integrated-provider acceptance. The default suite still diagnoses the
-// pinned beta.7 behavior; this suite must fail until the provider fixes land.
+// Integrated-provider acceptance, also run by the default beta.8 Wasm gate.
+// Installed-package/Viceroy qualification remains a separate opt-in command.
 const enabled = enabledReceiver()
 const cases = []
 function trial(name, check) {

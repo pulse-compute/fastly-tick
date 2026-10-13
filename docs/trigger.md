@@ -108,13 +108,15 @@ header or a warming client's location as executing-PoP evidence.
 FT-06 adds a closed outcome event, HTTP observations, a protected read-only
 status view, and bounded aggregate summaries; see [operations](operations.md).
 
-**Pulse beta.7 currently prevents these Native logs from being delivered in
-Viceroy 0.21.1.** Its generated `host_log` calls
+**Pulse beta.8 still cannot deliver these Native logs through the required
+stdio path.** Its generated `host_log` calls
 `fastly_log.endpoint_get("stdout")`; Viceroy rejects that reserved endpoint with
 InvalidArgument. Pulse then disables logging for that request. No error reaches
 the application. `--log-stdout` does not change the endpoint lookup rule.
-Validation and repair are deferred to the main Pulse trunk. No provider code is
-patched in this repository. This focused diagnostic currently fails:
+Fastly also reserves `stdout` and `stderr` for debugging stdio rather than named
+logging endpoints. [Pulse #309](https://github.com/pulse-compute/pulse/issues/309)
+tracks the remaining routing fix. No provider code is patched in this repository.
+This strict diagnostic remains outside the normal gate:
 
 ```sh
 PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:native-logs
@@ -124,8 +126,9 @@ PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:native-logs
 Do not report telemetry as working until the diagnostic above passes on a corrected
 Pulse version and the deployed receiver is checked separately.
 
-After a provider fix establishes stdout delivery, collect a short receiver
-`fastly log-tail --service-id RECEIVER_SERVICE_ID` session, stop it after the
+After a provider fix establishes real stdout delivery, collect a short receiver
+`fastly log-tail --service-id "$RECEIVER_SERVICE_ID" --stream stdout --timestamps`
+session, stop it after the
 observation window, and feed the resulting plain stdout lines to:
 
 ```sh
@@ -139,10 +142,12 @@ never claims the live gate passed automatically. Gaps describe merged arrivals,
 not a 15-second per-site guarantee; log loss, multiple sites/IPs, and clock skew
 affect them. An empty sample has unknown gaps, not zero gaps. Preserve a concise
 summary plus deployment identities and delete raw observation logs afterward.
-Usable post-KV event fields also require the redaction repair tracked in
-[Pulse #254](https://github.com/pulse-compute/pulse/issues/254). Until both logging
-gaps are qualified, use the protected HTTP view; do not infer zero work from
-missing or rejected log events.
+Beta.8 includes the redaction repair tracked in
+[Pulse #254](https://github.com/pulse-compute/pulse/issues/254); actual guest writes
+now preserve post-KV metric keys and credentials remain excluded. The
+[production procedure](operations.md#production-log-tail-and-report) keeps stdio
+delivery qualification separate. Until that gate passes, use the protected HTTP
+view; do not infer zero work from missing or rejected log events.
 
 The deferred operational checks do not prevent completing FT-01 or proceeding
 with FT-02. They remain unverified until recorded. Known Viceroy KV/CAS failures

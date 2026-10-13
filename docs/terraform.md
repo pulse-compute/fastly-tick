@@ -111,8 +111,8 @@ self-registration API or put runtime contents under Terraform ownership.
 If configuring a real worker origin, reconcile `worker_host` with both literal
 fetch URLs in `src/index.ts` and the backend mapping in `.pulse/config.ts` before
 building. Terraform does not rewrite compiled URLs. The current worker path is
-`/__tick/run`. Keep `dispatchEnabled = false` pending the upstream Pulse fixes
-and strict qualification described in the README.
+`/__tick/run`. Keep `dispatchEnabled = false` pending deployed qualification
+described in the README; beta.8's provider fixes are covered by local ABI tests.
 
 Build and package the reviewed receiver:
 

@@ -4,19 +4,20 @@ A small Pulse → Fastly Native Wasm receiver that turns distributed health chec
 into best-effort worker invocations. This private, independent repository imports
 no `pulse-compute/tick` source. The [v0.1 specification](docs/spec.md) defines scope.
 
-**Dispatch is compiled off** pending Pulse Native timeout, transport recovery and
-missing ACK-header fixes ([#250](https://github.com/pulse-compute/pulse/issues/250),
-[#251](https://github.com/pulse-compute/pulse/issues/251),
-[#252](https://github.com/pulse-compute/pulse/issues/252)). The shipped receiver can
-prepare delivery records but sends nothing. Enabled dispatch is tested in an
-isolated Native build. Logging, live cadence, trusted PoP filtering and live KV /
-service-to-service smoke remain deferred; documented Viceroy failures do not
-block implementation. This is a build candidate, not a deployed scheduler claim.
+**Dispatch is compiled off** pending deployed qualification. Pulse beta.8 fixes
+the Native timeout, transport recovery, missing-header and structured-log issues;
+the normal Wasm gate now checks those contracts in an isolated enabled build.
+The shipped receiver prepares delivery records but sends nothing. Live cadence,
+trusted PoP filtering and live KV / service-to-service smoke remain deferred;
+documented Viceroy failures do not block implementation. Native stdio delivery
+for `ctx.log` / Fastly log-tail still requires
+[Pulse #309](https://github.com/pulse-compute/pulse/issues/309). This is a build
+candidate, not a deployed scheduler claim.
 
 ## Build, test and retrieve a candidate
 
 Use **Node 24.19.0** (CI version; Pulse also supports Node 22.14+ on 22.x).
-Pulse, CLI and Fastly provider are pinned to **1.0.0-beta.7** in the npm lockfile.
+Pulse, CLI and Fastly provider are pinned to **1.0.0-beta.8** in the npm lockfile.
 No Fastly account, CLI or Viceroy is needed for the normal verification gate.
 
 ```sh
@@ -27,7 +28,8 @@ npm run verify
 `verify` runs `check` (package/lock metadata, types, trigger configuration/behavior and canonical app
 fixtures) before `verify:native` (receiver/worker builds, injected Fastly ABI
 fixtures and reports). The dispatch, registry, retry and operations suites share
-one freshly built enabled receiver; admission additionally builds its distinct
+one freshly built enabled receiver, including combined beta.8 acceptance;
+admission additionally builds its distinct
 fail-closed PoP variant. Standalone `test:dispatch`, `test:registry`,
 `test:redelivery` and `test:observability` commands still build their own variant.
 `.pulse/config.ts` explicitly selects Fastly **Native**, with no JS fallback.
@@ -137,7 +139,7 @@ or environment; keep tokens out of git and debug output.
 The two literal fetch URLs in `src/index.ts` and their `.pulse/config.ts` binding
 use **`uptime.example.com` as a placeholder**. Replace both sites and the binding
 with the real worker origin when configuring an enabled deployment. Keep
-`dispatchEnabled = false` until the upstream fixes and strict qualification pass;
+`dispatchEnabled = false` until the strict qualification and deployed smoke pass;
 then update the mirrored status settings and rebuild/review the candidate.
 A registry cannot authorize a new destination or dynamic backend.
 
@@ -218,8 +220,9 @@ configuration and rotate it together with the receiver Secret Store value.
 
 The planned KV + ACK + overhead + reserve total must fit the upstream timeout.
 Elapsed fences stop new work, but **cannot interrupt** the provider's fixed KV
-wait or ignored fetch timeout. Backend timeouts alone do not repair fatal
-transport recovery. These values are not a measured latency guarantee.
+wait. Beta.8 bounds individual fetches and exposes recoverable transport/timeout
+errors; slow KV still prevents a universal five-second response guarantee.
+These values are not a measured latency guarantee.
 
 After activation, send one ordinary request to the **trigger domain** from each
 available regional vantage. A 404 can initialize a site; it does not prove a
@@ -242,13 +245,27 @@ sending. Probe headers expose per-request admission/send/ACK/budget observations
 `acked` is persisted acceptance, not completion; stale state is not liveness.
 [Operations](docs/operations.md) documents all fields and bounded summaries.
 
+The receiver already uses `ctx.log.info` for `fastly_tick.probe` arrivals and
+`fastly_tick.outcome` summaries, plus a closed `ctx.log.warn` event for recoverable
+dispatch errors. After the Native stdio fix in Pulse #309 is available and the
+receiver is rebuilt, watch the deployed service with:
+
+```sh
+fastly log-tail --service-id "$RECEIVER_SERVICE_ID" --stream stdout --timestamps
+```
+
+Confirm arrival and outcome events before relying on the stream. The
+[production observation procedure](docs/operations.md#production-log-tail-and-report)
+shows a short idle test and the existing JSON summarizer. Until delivery is
+qualified, `/__tick/status` provides read-only state; missing logs mean unknown.
+
 | Symptom | Check |
 | --- | --- |
 | 401 | Resource link, nonempty matching probe secret and duplicate/header count |
 | Healthy but no sends | Shipped dispatch gate; then admission, registry, due slot, credential and remaining budget |
 | Read failure / invalid state | KV binding, conditional envelope and schema; do not overwrite state as a guessed repair |
-| Empty 200, late ACK or hanging failure | Known Native transport/header/timeout gaps; preserve strict qualification failures |
-| Missing or rejected logs | Deferred stdout delivery and post-KV redaction ([Pulse #254](https://github.com/pulse-compute/pulse/issues/254)); use HTTP status/headers |
+| Empty 200, late ACK or hanging failure | Check deployed package/version, exact ACK contract and strict HTTP qualification; slow KV still has a separate budget gap |
+| Missing or rejected logs | Native stdio delivery still needs Pulse #309; beta.8 fixes post-KV shape corruption. Use HTTP status/headers until tailing is qualified |
 
 Scheduling is **best effort**, approximate and without catch-up. Only the latest
 UTC slot is considered; missed slots are dropped. Lost ACKs may redeliver the

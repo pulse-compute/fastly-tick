@@ -98,13 +98,15 @@ test('elapsed preparation leaves ACK, overhead and response reserve before send'
   assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
 })
 
-test('late or unmeasurable ACK never accepted; no immediate retry', () => {
+test('deadline or unmeasurable ACK never accepted; no immediate retry', () => {
   for (const delayMs of [1000, 1500]) {
-    const result = healthy(receiver(binary, { delayMs }), 'late-ack')
-    assert.equal(result.headers['x-tick-ack-latency-ms'], '' + delayMs)
+    const result = healthy(receiver(binary, { fixture: { delayMs } }), 'unacknowledged')
+    assert.equal(result.headers['x-tick-dispatch-error'], 'timeout')
+    assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
+    assert.equal(result.monotonicMs, 1000)
     assert.equal(result.captured.length, 1)
   }
-  healthy(receiver(binary, { delayMs: 999 }), 'acked')
+  healthy(receiver(binary, { fixture: { status: 202, headers: { 'x-tick-invocation-id': runId }, delayMs: 999 } }), 'acked')
   let calls = 0
   const result = healthy(receiver(binary, { realtimeClock() {
     calls++
@@ -113,10 +115,20 @@ test('late or unmeasurable ACK never accepted; no immediate retry', () => {
   assert.equal(result.headers['x-tick-ack-latency-ms'], undefined)
 })
 
-test('diagnostic: beta.7 transport failures are fatal, not healthy outcomes', () => {
-  for (const [fixture, stage] of [[{ sendStatus: 1 }, 77], [{ transportStatus: 1 }, 81]]) {
-    assert.throws(() => receiver(binary, { fixture }), error =>
-      error.detail?.lastError === 1006 && error.detail?.errorStage === stage)
+test('fetch errors return healthy, retain the claim and emit a closed warning', () => {
+  for (const [fixture, reason] of [[{ sendStatus: 1 }, 'transport'],
+    [{ transportStatus: 1 }, 'transport'], [{ delayMs: 1500 }, 'timeout']]) {
+    const emitted = []
+    const result = healthy(receiver(binary, { fixture, logEndpointFailure: false,
+      onLogWrite(message) { emitted.push(message) } }), 'unacknowledged')
+    assert.equal(result.headers['x-tick-dispatch-error'], reason)
+    assert.equal(result.captured.length, 1)
+    const warnings = emitted.filter(line => line.includes('fastly_tick.dispatch_error'))
+    assert.equal(warnings.length, 1)
+    assert.deepEqual(JSON.parse(warnings[0].slice(warnings[0].indexOf('{'))), {
+      event: 'fastly_tick.dispatch_error', receiver: 'fastly-tick', reason,
+    })
+    for (const secret of [token, workerToken]) assert.ok(!emitted.some(line => line.includes(secret)))
   }
 })
 

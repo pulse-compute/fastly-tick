@@ -2,9 +2,8 @@
 
 FT-04 implements selection and delivery records; [FT-05](redelivery.md) adds
 bounded redelivery and crash recovery. **Dispatch stays
-compiled off** pending Pulse [#250](https://github.com/pulse-compute/pulse/issues/250),
-[#251](https://github.com/pulse-compute/pulse/issues/251), and
-[#252](https://github.com/pulse-compute/pulse/issues/252). The shipped app prepares
+compiled off** pending deployed qualification. Beta.8's timeout, transport and
+missing-header fixes are covered by the normal injected-ABI gate. The shipped app prepares
 zero-attempt pending records, resolves no worker credentials, and sends nothing.
 An isolated enabled Native build tests the conditional send and ACK path.
 Same-slot redelivery and attempt exhaustion follow the FT-05 policy. Logging, live
@@ -133,14 +132,14 @@ per-run history. No delete or unconditional write is used in the receiver.
 One sweep performs at most one registry read, two delivery reads, two first-attempt
 conditional writes, two sends, two settlement reads and two settlement CAS writes.
 Including sweep coordination, the maximum is six reads and five conditional
-writes. There are two explicit delivery blocks because beta.7 does not permit
+writes. There are two explicit delivery blocks because Native does not admit
 writes/fetches inside read loops; the scan itself is pure and literally capped at
 eight. No compiler/runtime/package is patched.
 
 Elapsed fences run before registry/delivery work and first-attempt writes, before
 send, and before ACK settlement writes. They preserve the existing 1,500ms KV
 fence and 4,000ms work fence with response headroom. They **cannot interrupt** the
-provider's fixed KV wait or ignored fetch timeout; live total-budget enforcement
+provider's fixed KV wait; live total-budget enforcement
 is still unproven.
 
 Authenticated winner responses expose bounded counts via `x-tick-workers-considered`,
