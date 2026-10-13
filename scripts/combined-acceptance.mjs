@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // Separate application acceptance, deliberately absent from Pulse publication
-// and the pinned beta.7 diagnostic suite. Never mutate installed package bytes.
+// from the default injected-ABI suite. Never mutate installed package bytes.
 const root = fileURLToPath(new URL('..', import.meta.url))
 const args = process.argv.slice(2)
 assert.equal(args.length, 4, 'Use --packages /absolute/path/pulse-release-manifest.json --out /fresh/report-directory')
@@ -74,7 +74,7 @@ try {
     report.packages.push({ name: pkg.name, version: pkg.version, sha256: pkg.sha256 })
     return path
   })
-  // A lockfile for published beta.7 must not silently substitute registry Pulse
+  // The published-package lockfile must not silently substitute registry Pulse
   // packages for these explicit local candidates. Keep the source lock untouched.
   rmSync(join(consumer, 'package-lock.json'))
   run('install', 'npm', ['install', '--ignore-scripts', '--no-save', '--package-lock=false', '--no-audit', '--no-fund', ...archives])

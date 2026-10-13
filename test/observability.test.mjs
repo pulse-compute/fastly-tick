@@ -130,16 +130,21 @@ test('failed log endpoint or write never changes probe health or admission', () 
 test('Native receiver ACK is visible in a fresh read-only instance; status does not count as a trigger', () => {
   const state = registryState()
   const workerState = authority()
-  const accepted = send(state, { receive(request, fixture) {
+  const emitted = []
+  const accepted = send(state, { onLogWrite(message) { emitted.push(message) }, receive(request, fixture) {
     const result = worker({ state: workerState, request: { method: 'POST', path: '/__tick/run', headers: request.headers, body: request.body } })
     fixture.status = result.response.status
     fixture.headers = Object.fromEntries(result.response.headers)
   } })
   assert.equal(accepted.response.body, 'healthy')
   assert.equal(outcome(accepted).acks, 1)
-  // Preserve the real beta.7 logging failure instead of repairing masked keys.
-  assert.ok(accepted.logs.some(log => log.message.includes('cons<redacted>ered')))
-  assert.equal(events(accepted).filter(event => event.event === 'fastly_tick.outcome').length, 0)
+  // Assert actual guest writes before the injected host's evidence redaction.
+  const closed = emitted.map(parseEvent).filter(event => event?.event === 'fastly_tick.outcome')
+  assert.equal(closed.length, 1)
+  assert.deepEqual(closed[0], outcome(accepted))
+  assert.equal(closed[0].considered, 1)
+  assert.equal(closed[0].acks, 1)
+  for (const secret of [token, workerToken]) assert.ok(!emitted.some(line => line.includes(secret)))
   const view = snapshot(state, { headers: { 'x-tick-probe-token': token, 'x-tick-worker-id': 'uptime' }, logEndpointFailure: false })
   assert.equal(view.value.deliveryStatus, 'acked')
   assert.equal(view.value.attempts, 1)
@@ -154,8 +159,11 @@ test('both sends retain individual ACK latencies, rejection/late-response counts
   assert.equal(outcome(two).ackLatencyTwoMs, 10)
   assert.equal(two.headers['x-tick-acks'], '2')
   assert.equal(outcome(two).dispatchLatenessMs, 110)
+  let sent = false
   for (const [options, field] of [[{ fixture: { status: 503, headers: {} } }, 'invalidAcks'],
-    [{ hostcallDelayMs: { 'fastly_http_req.pending_req_wait': 1000 } }, 'ackTimeouts']]) {
+    [{ receive() { sent = true }, realtimeClock() {
+      return { nanoseconds: BigInt(60000 + (sent ? 1000 : 0)) * 1000000n }
+    } }, 'ackTimeouts']]) {
     const result = send(registryState(), options)
     assert.equal(result.response.body, 'healthy')
     assert.equal(outcome(result)[field], 1)
@@ -164,7 +172,7 @@ test('both sends retain individual ACK latencies, rejection/late-response counts
   }
 })
 
-test('KV plus two bounded ACK waits leave the upstream response reserve; late work stops next candidate', () => {
+test('KV plus two bounded ACK waits leave response reserve; a timeout stops the next candidate', () => {
   const state = registryState(registry([entry('a'), entry('b')]))
   const result = send(state, { fault: stage => ['lookup', 'insert'].includes(stage) ? { readyDelayMs: 50 } : undefined,
     hostcallDelayMs: { 'fastly_http_req.pending_req_wait': 999 } })
@@ -173,10 +181,12 @@ test('KV plus two bounded ACK waits leave the upstream response reserve; late wo
   assert.equal(outcome(result).responseElapsedMs, 2548)
   assert.ok(outcome(result).responseElapsedMs <= 5000 - 1000)
   const slow = send(registryState(registry([entry('a'), entry('b')])), {
-    hostcallDelayMs: { 'fastly_http_req.pending_req_wait': 2000 },
+    fixture: { delayMs: 2000 },
   })
-  assert.equal(outcome(slow).sends, 1)
-  assert.equal(slow.headers['x-tick-registry'], 'budget-exhausted')
+  assert.equal(slow.response.body, 'healthy')
+  assert.equal(slow.headers['x-tick-dispatch-error'], 'timeout')
+  assert.equal(slow.outboundRequests.length, 1)
+  assert.equal(outcome(slow), null, 'partial error-path counters stay unknown')
 })
 
 test('summaries withhold percentiles below 20 individual ACK samples and never certify deployment', () => {

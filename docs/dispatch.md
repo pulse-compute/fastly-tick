@@ -1,9 +1,11 @@
 # FT-03 — fixed worker dispatch and exact ACK
 
-The static transport and worker fixture are implemented. **Dispatch is disabled
-by default because Pulse beta.7 cannot yet satisfy the required Native failure
-and timeout behavior.** This is separate from the accepted, nonblocking Viceroy
-KV/CAS discrepancies. Logging, live cadence, and deployed smoke remain deferred.
+The static transport and worker fixture use Pulse beta.8. **Dispatch remains
+disabled by default pending deployed qualification.** Native timeout, recoverable
+transport failure, missing-header and structured-log contracts are checked in the
+normal injected-ABI gate. Viceroy KV/CAS discrepancies remain nonblocking; live
+cadence and deployed smoke remain deferred. Native stdio logging delivery is
+tracked separately in [Pulse #309](https://github.com/pulse-compute/pulse/issues/309).
 
 ## Fixed descriptor
 
@@ -68,40 +70,28 @@ This fixture does not start work after returning or pretend a background promise
 survives Compute request termination. Real workers must take responsibility for
 their actual work before ACKing.
 
-## Published beta.7 capability blockers
+## Beta.8 capability checks
 
-| Required behavior | Reproduced beta.7 behavior |
+The normal Wasm gate now checks the fixes originally tracked in Pulse #250,
+#251, #246/#252 and #254 using the installed beta.8 packages:
+
+| Contract | Checked behavior |
 | --- | --- |
-| Bound ACK wait at 1,000ms | `timeoutMs` is accepted but not read by Native fetch lowering; delayed headers blocked for about 1,400ms |
-| Return healthy after transport failure | Send/wait failures are fatal transport errors; a reset returned an empty 200 instead of `healthy` |
-| Return healthy for 202 without matching ID | Missing response-header lookup produced an empty 200 in Viceroy, while the injected host returned the intended healthy unacknowledged outcome |
+| Fetch deadline | Headers at or after 1,000ms time out; headers before it can ACK without waiting for the body |
+| Transport recovery | Send/wait failures return healthy with a transport marker, preserving the pending claim without an immediate retry |
+| Missing ACK header | A missing ID remains healthy and unacknowledged |
+| Structured logs | Post-KV metric keys survive and actual guest writes exclude credentials |
 
-The published beta.7 `provider-fastly/src/build/native-platform-capabilities.js` parses
-method, headers, body/JSON, and backend for fetch, then directly calls
-`pending_req_wait`; it never uses `init.timeoutMs`. Nonzero send/wait status
-sets transport error 1006 at stage 77/81. `native-application-errors.js` does not
-route transport failures through `app.error`. Missing-header behavior is related
-to the existing [Pulse #246](https://github.com/pulse-compute/pulse/issues/246)
-direct request-header report; this session additionally reproduced it on a
-response header without asserting that the underlying causes are identical.
-
-The app passes `timeoutMs: 1000` to express the contract and rejects a measured
-late ACK after the wait. That elapsed check cannot interrupt a pending request.
-Backend timeouts may limit the network wait, but their transport failures still
-need application recovery. A whole-request budget is not a substitute: it returns
-a terminal 504 and cannot preserve a healthy probe response.
+The application error handler also emits a closed `fastly_tick.dispatch_error`
+warning with reason `timeout` or `transport`. That path has no complete outcome
+counters; consumers must retain unknown values rather than invent zeros.
 
 The work budget remains 4,000ms within a 5,000ms health check, leaving a 1,000ms
-response reserve. Before send, the app also reserves 1,000ms for ACK and 500ms
-for local overhead. These fences stop new work after slow preparation; the
-existing 10-second KV wait and ignored fetch timeout prevent claiming the total
-budget is enforced. No second dispatch is added.
-
-The smallest prerequisite is supported Native per-fetch timeout and recoverable
-transport/header failure outcomes. No Pulse source, installed package, generated
-Wasm, or alternate runtime is patched here. `dispatchEnabled = false` in the
-receiver keeps this incomplete capability from changing deployed probe health.
-The test builds an isolated enabled variant to prove available behavior.
+response reserve. Before send, the app reserves the ACK budget and 500ms for
+local overhead. Fetches are bounded by beta.8, but the provider's fixed KV wait
+still prevents a universal response-budget guarantee. No Pulse source, installed
+package or generated Wasm is patched. The shipping receiver stays disabled while
+an isolated enabled variant exercises the contracts.
 
 ## Focused verification
 
@@ -111,31 +101,21 @@ PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:native
 PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:native-dispatch-qualification
 ```
 
-The dispatch tests execute both emitted Wasm modules against injected Fastly
-ABIs. They cover the exact request, reserved headers, auth and claim gates, bogus
-ACKs, ignored bodies, elapsed-budget fences, and receipt ownership. A diagnostic
-asserts the known fatal transport behavior; that assertion passing does not
-qualify healthy error recovery.
+The default gate executes both emitted modules against injected Fastly ABIs,
+including exact request/auth/claim rules, deadline boundaries, recoverable errors,
+ACK body independence, lost-ACK redelivery and strict structured observations.
 
-The Viceroy runner executes real loopback HTTP, including dispatch between two
-independent Native services and an origin with delayed body delivery. In the
-implementation run, the independent worker ACK took about 3ms; this is a local
-sample, not deployed latency. The strict qualification run returned **6/9**:
-missing ACK ID, bounded header wait, and healthy transport recovery failed as
-described above. Strict assertions remain unchanged. No live Fastly service-to-
-service smoke or latency measurement was performed.
-
-At the initial FT-03 commit, `verify` passed: typecheck, 5 setup tests, 10 canonical fixtures, 13 admission
-tests, 11 dispatch/worker tests, both builds, and receiver report identity.
-The default receiver also passed all 11 Viceroy HTTP regressions. Receiver
-Wasm is 118,811 bytes; the independent fixture is 111,989 bytes. Generated
-reports and artifacts remain ignored and reproducible.
+The optional Viceroy runner adds real loopback HTTP, independent receiver/worker
+services and delayed headers/bodies. Its strict assertions remain intact; local
+ABI success is not a deployed service-to-service smoke or latency measurement.
+Logging stdio qualification remains separate from post-KV event-shape checks.
 
 ## Combined acceptance for the integrated provider fixes
 
 The opt-in gate tests the integrated Pulse candidate for #246/#252 (missing
 headers), #251 (transport recovery), #250 (fetch deadlines), and #254 (safe
-structured logging). Published dependency pins stay at beta.7 until release.
+structured logging). The default suite uses the published beta.8 pins; this
+additional command checks explicit local package tarballs against real HTTP.
 
 ```sh
 PULSE_VICEROY_BIN=/absolute/path/to/viceroy npm run test:combined-acceptance -- \

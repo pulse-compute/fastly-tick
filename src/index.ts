@@ -4,8 +4,8 @@ import type { Sweep, Registry, Delivery } from './schemas.js'
 const app = new Pulse({ auto: true })
 
 app.get('/__tick/probe', async (ctx) => {
-  // beta.7's direct header lookup does not reject an absent header correctly
-  // in Viceroy. Read the normalized lowercase header pairs and reject duplicates.
+  // Keep normalized header-list auth and duplicate rejection after the beta.8
+  // missing-header fix; this also enforces the explicit header-count bound.
   const headers = ctx.req.headers
   let supplied = ''
   let matches = 0
@@ -34,7 +34,7 @@ app.get('/__tick/probe', async (ctx) => {
     return ctx.text('unauthorized', { status: 401 })
   }
 
-  // Static app settings. Rebuild after changing them. beta.7 has no trusted
+  // Static app settings. Rebuild after changing them. The provider has no trusted
   // executing-PoP API: all mode works; any filtering mode must skip before KV.
   const popMode = 'all'
   const resolutionMs = 15000
@@ -103,7 +103,7 @@ app.get('/__tick/probe', async (ctx) => {
   if (seen.status === 'not-found') {
     due = true
   } else if (seen.status === 'found') {
-    // beta.7 accepts `typeof` at build time but cannot execute it in Native.
+    // Keep explicit bounded value checks without assuming Native typeof support.
     // Use its supported schema validator; the error lane below skips bad data.
     ctx.encodeJson(seen.value, 'tick.Sweep')
     const value = seen.value
@@ -126,7 +126,7 @@ app.get('/__tick/probe', async (ctx) => {
   if (due) {
     const beforeClaim = await ctx.time.now()
     // These fences prevent starting MORE work after a slow KV operation. They
-    // cannot interrupt beta.7's fixed 10s KV wait; see docs/admission.md.
+    // cannot interrupt the provider's fixed 10s KV wait; see docs/admission.md.
     if (beforeClaim.status !== 'ok') {
       admission = 'clock-unavailable'
     } else if (beforeClaim.unixEpochMs < clock.unixEpochMs ||
@@ -167,7 +167,7 @@ app.get('/__tick/probe', async (ctx) => {
   // Small authenticated HTTP observations make admission inspectable even while
   // Native log delivery is deferred. No generation, token, or raw KV payload is exposed.
   if (admission === 'admitted') {
-    // The fixed descriptor is still gated on Pulse #250/#251/#252.
+    // Keep the fixed descriptor disabled until deployed dispatch qualification.
     const dispatchEnabled = false
     const requestWorkBudgetMs = 4000
     let dispatch = dispatchEnabled ? 'not-due' : 'disabled'
@@ -230,7 +230,7 @@ app.get('/__tick/probe', async (ctx) => {
             }
           }
           const deliveries = ctx.kv<Delivery>('tick')
-          // beta.7 permits read-only effects in loops. Keep exactly two explicit
+          // Native admits only selected read effects in loops. Keep two explicit
           // conditional-write/send blocks, matching the hard two-worker cap.
           if (first >= 0) {
             const item = registry.workers[first]
@@ -716,6 +716,9 @@ app.error(async (error, ctx, next) => {
       (code === 'PULSE_FETCH_NETWORK' || code === 'PULSE_FETCH_TIMEOUT')) {
     // The attempt may have reached the worker. Leave its pending lease intact;
     // never ACK, settle, or retry after an uncertain transport/header outcome.
+    ctx.log.warn(code === 'PULSE_FETCH_TIMEOUT'
+      ? '{"event":"fastly_tick.dispatch_error","receiver":"fastly-tick","reason":"timeout"}'
+      : '{"event":"fastly_tick.dispatch_error","receiver":"fastly-tick","reason":"transport"}')
     return ctx.text('healthy', { headers: {
       'cache-control': 'no-store', 'x-tick-admission': 'admitted',
       'x-tick-dispatch': 'unacknowledged',

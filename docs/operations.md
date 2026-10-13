@@ -1,12 +1,11 @@
 # FT-06 — minimal operational visibility
 
 The application exposes bounded HTTP observations and a protected current-state
-view. Structured logs and their summarizer are implemented, but Native logging
-qualification and the integrated deployed proof remain **deferred** by the owner.
-FT-06's live acceptance gates are still open. Dispatch stays compiled off pending
-Pulse [#250](https://github.com/pulse-compute/pulse/issues/250),
-[#251](https://github.com/pulse-compute/pulse/issues/251), and
-[#252](https://github.com/pulse-compute/pulse/issues/252).
+view. Pulse beta.8's structured-log shape is checked against actual guest writes,
+including registry reads, ACK metrics and secret exclusion. Native stdio delivery
+still requires [Pulse #309](https://github.com/pulse-compute/pulse/issues/309).
+FT-06's deployed acceptance gates remain open, and dispatch stays compiled off
+pending live qualification.
 
 ## Current state without triggering work
 
@@ -56,7 +55,7 @@ Authenticated probe responses retain admission/registry/dispatch headers and add
 | `x-tick-response-elapsed-ms` | Before probe secret lookup through the pre-response clock sample; excludes header scan, final log/response construction and transmission |
 
 Counts are per response, never aggregate KV counters. Skipped probes have no
-dispatch work. Schema error responses or fatal provider exits may lack outcome
+dispatch work. Recoverable fetch errors, schema errors or fatal exits may lack outcome
 metrics; missing metrics are unknown, not zero. Legacy `x-tick-dispatch` and
 `x-tick-ack-latency-ms` describe the last handled send, so use the new counts and
 individual samples for two-worker observations. ACK observations and confirmed
@@ -67,20 +66,57 @@ cancellation or healthy transport recovery.
 The app attempts one `fastly_tick.probe` arrival log and one closed
 `fastly_tick.outcome` summary. It includes no IDs, bodies, tokens, secret-bearing
 headers, opaque generations, or raw KV. Logging failure does not gate work.
-Fatal exits and schema errors can leave arrivals without outcome logs.
+Recoverable dispatch failures emit a closed `fastly_tick.dispatch_error` warning
+with only `receiver` and a `timeout` or `transport` reason. They return healthy
+without an outcome summary because partial counters are unknown. The summarizer
+ignores these warnings; arrival/outcome differences must not be filled with zeros.
 
-Logging remains unqualified for two separate reasons:
+Beta.8 repairs [Pulse #254](https://github.com/pulse-compute/pulse/issues/254):
+registry key `id` no longer corrupts unrelated structured metric keys. Tests
+inspect actual guest log writes before the injected host's separate trace
+redaction; a permissive injected sink is not proof of platform delivery.
+The provider still opens reserved `stdout` with the named logging-endpoint ABI,
+which Viceroy rejects and Fastly's endpoint contract forbids. Real stdio routing
+is tracked in Pulse #309. HTTP observations remain available while this is fixed.
 
-- The beta.7 reserved-stdout endpoint fails under Viceroy; see [trigger](trigger.md).
-- KV read/write redaction masks unrelated metric keys after reading a registry:
-  `considered` becomes `cons<redacted>ered` when KV contains the key `id`.
-  [Pulse #254](https://github.com/pulse-compute/pulse/issues/254) tracks this new
-  reproduction. The summarizer rejects the altered event shape; no redaction or
-  provider code is bypassed here. HTTP headers/current-state JSON remain usable.
+## Production log-tail and report
+
+Use this procedure **after** the Pulse #309 stdio fix is available, the dependency
+pins are updated and the reviewed receiver is rebuilt/deployed. It is an operator
+test, not a claim that the current beta.8 logger already reaches log-tail.
+[Fastly log-tail](https://www.fastly.com/documentation/reference/cli/log-tail/)
+streams Compute stdout/stderr; Terraform does not create a named `stdout` endpoint.
+
+1. Supply `FASTLY_API_TOKEN` and `RECEIVER_SERVICE_ID` securely. Start tailing before
+   warming the trigger. Capture outside the checkout if a summary is needed:
+
+   ```sh
+   tick_log_path="$(mktemp "${TMPDIR:-/tmp}/fastly-tick-log.XXXXXX")"
+   fastly log-tail --service-id "$RECEIVER_SERVICE_ID" --stream stdout --timestamps \
+     | tee "$tick_log_path"
+   ```
+
+2. From another terminal, warm the activated trigger with one ordinary request
+   from each available regional vantage as described in [trigger](trigger.md).
+   During a three-minute idle window, avoid manual receiver probes. Look for
+   `fastly_tick.probe` arrivals tagged `healthcheck`, admission outcomes and any
+   dispatch-error warnings. Status reads do not generate heartbeats.
+3. Stop the tail with Ctrl-C, then summarize the captured stream:
+
+   ```sh
+   node scripts/observe.mjs deployed < "$tick_log_path"
+   rm -- "$tick_log_path"
+   ```
+
+Record receiver/trigger versions and receiver Wasm digest alongside the concise
+summary. Require valid arrival and outcome events before using its counts. With
+shipping dispatch disabled, sends/ACKs are zero; delivery testing is a separate
+enabled-candidate gate. An empty stream means delivery is unverified, not that no
+probes arrived. Merged arrivals do not establish per-site cadence or PoP coverage.
 
 ## Bounded summaries
 
-After Pulse logging is repaired and checked on the deployed receiver, stop a
+After stdio delivery is repaired and checked on the deployed receiver, stop a
 short log-tail session and summarize it:
 
 ```sh
@@ -120,20 +156,22 @@ The combined-wait fixture injects 50ms per KV operation plus two 999ms ACK waits
 It observes 2,548ms of probe work, leaving the configured 1,000ms reserve under
 the 5,000ms upstream timeout. Authentication now enters elapsed fences: a slow
 probe secret lookup stops before any KV. Late work stops another candidate.
-These fences cannot interrupt fixed KV waits or the ignored fetch timeout.
-Healthy timeout/transport recovery and a universal response deadline remain
-unproven; the existing strict HTTP qualification keeps its failed assertions.
+These fences cannot interrupt fixed KV waits. Beta.8's injected-ABI acceptance
+checks healthy fetch timeout/transport recovery and header deadlines; a universal
+response deadline and deployed recovery remain unproven. Strict HTTP
+qualification retains its assertions and remains separate from the normal gate.
 
 | Gate | Current result |
 | --- | --- |
 | Genuine Native build/report and focused state transitions | Locally verified; report identifies actual artifact/configuration |
 | Protected status and bounded observations | Verified through emitted Wasm; Native HTTP checked separately |
-| Native log endpoint and usable post-KV log shape | Deferred; existing stdout gap plus Pulse #254 |
+| Usable post-KV structured log shape | Verified through actual guest writes with beta.8 |
+| Native stdio delivery / production log-tail | Pending Pulse #309, then deployed verification |
 | Trusted receiver PoP / filtering | Deferred; all-PoP mode |
 | Live trigger arrivals, warm-up, coverage and redeploy | Deferred; no deployed cadence claim |
 | Live conditional-write arbitration and overlapping probes | Deferred; known Viceroy discrepancies remain nonblocking |
 | Live service-to-service ACK and deliberately lost ACK → retry | Deferred; synthetic two-module recovery is verified |
-| Slow/unavailable worker within health-check budget | Pending Pulse timeout/error fixes, then deployed qualification |
+| Slow/unavailable worker within health-check budget | Beta.8 injected fetch recovery verified; deployed qualification and slow-KV bound pending |
 
 For the eventual bounded live run, use the setup in [trigger](trigger.md) and
 [dispatch](dispatch.md). Identify receiver/worker service versions, trigger

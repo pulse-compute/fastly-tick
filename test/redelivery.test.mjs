@@ -53,9 +53,10 @@ test('worker accepts, ACK is lost, later heartbeat redelivers same ID and stops 
     fixture.headers = Object.fromEntries(result.response.headers)
     if (received.length === 1) fixture.transportStatus = 1 // Worker accepted; its ACK is lost.
   }
-  // beta.7's failure is fatal, but the pre-send reservation survives. This
-  // proves redelivery state, not the deferred healthy transport-error contract.
-  assert.throws(() => heartbeat(state, 60000, { receive: accept }), error => error.detail?.lastError === 1006)
+  const lost = heartbeat(state, 60000, { receive: accept })
+  assert.equal(lost.headers['x-tick-dispatch'], 'unacknowledged')
+  assert.equal(lost.headers['x-tick-dispatch-error'], 'transport')
+  assert.equal(lost.captured.length, 1)
   assert.equal(workerState.stores.get('worker_state').size, 1)
   assert.equal(delivery(state).status, 'pending')
   assert.equal(delivery(state).attempts, 1)
@@ -151,9 +152,12 @@ test('termination after worker acceptance can cause duplicate delivery, never ex
   assert.equal(delivery(state).status, 'acked')
 })
 
-test('fatal beta.7 transport failure leaves claimed state recoverable without claiming healthy recovery', () => {
+test('healthy transport recovery leaves the claim pending until a later heartbeat', () => {
   const state = registryState()
-  assert.throws(() => heartbeat(state, 60000, { response: 'reset' }), error => error.detail?.lastError === 1006)
+  const reset = heartbeat(state, 60000, { response: 'reset' })
+  assert.equal(reset.headers['x-tick-dispatch'], 'unacknowledged')
+  assert.equal(reset.headers['x-tick-dispatch-error'], 'transport')
+  assert.equal(reset.captured.length, 1)
   assert.equal(delivery(state).status, 'pending')
   assert.equal(delivery(state).attempts, 1)
   heartbeat(state, 75000)

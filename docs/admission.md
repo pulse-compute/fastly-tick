@@ -1,6 +1,6 @@
 # FT-02 — conditional sweep admission
 
-The receiver implements admission using Pulse `1.0.0-beta.7` Native KV. It does
+The receiver implements admission using Pulse `1.0.0-beta.8` Native KV. It does
 not read a worker registry or dispatch work yet. **Owner disposition, 2026-10-09:
 known Viceroy KV/CAS failures are documented and nonblocking. Live KV smoke
 testing is deferred; FT-02 completion and subsequent implementation may proceed.**
